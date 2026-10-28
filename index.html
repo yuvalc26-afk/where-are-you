@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>איפה אתה?</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">איפה אתה?</div>
+    <div class="connect">
+      <button id="btnBle" class="primary">חבר BLE</button>
+      <button id="btnUsb" hidden>חבר USB</button>
+      <button id="btnDemo" class="ghost">דמו</button>
+      <button id="btnDisconnect" class="ghost" hidden>נתק</button>
+    </div>
+    <div class="chips">
+      <span id="chipDongle" class="chip off">איפה אתה: לא מחובר</span>
+      <span id="chipNode" class="chip off">אני פה: לא ידוע</span>
+      <span id="chipBusy" class="chip busy" hidden>עובד…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div class="map-tools">
+        <button id="btnFit" title="הצג את שניהם">⤢</button>
+        <button id="btnMe" title="המיקום שלי">◎</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="card nav">
+        <div class="arrow-box">
+          <svg id="arrow" viewBox="0 0 100 100" aria-hidden="true">
+            <path d="M50 6 L80 90 L50 72 L20 90 Z"></path>
+          </svg>
+        </div>
+        <div class="nav-text">
+          <div id="distance" class="distance">—</div>
+          <div id="bearing" class="muted">אין עדיין מיקום של "אני פה"</div>
+          <div id="fixAge" class="muted"></div>
+        </div>
+        <a id="btnNavigate" class="button ghost" target="_blank" rel="noopener" hidden>נווט</a>
+      </div>
+
+      <div class="card">
+        <h2>פקודות</h2>
+        <div class="actions">
+          <button data-cmd="get_last" class="primary">מיקום אחרון</button>
+          <button data-cmd="ping">פינג / בדיקת קשר</button>
+          <div class="combo">
+            <button data-cmd="gps_fix">בדוק GPS עכשיו</button>
+            <select id="gpsTimeout" aria-label="זמן חיפוש">
+              <option value="60">60 ש׳</option>
+              <option value="120" selected>120 ש׳</option>
+              <option value="300">5 דק׳</option>
+            </select>
+          </div>
+          <div class="combo">
+            <button data-cmd="ble_on">הדלק BLE</button>
+            <select id="bleMinutes" aria-label="משך BLE">
+              <option value="10">10 דק׳</option>
+              <option value="30" selected>30 דק׳</option>
+              <option value="60">שעה</option>
+              <option value="0">עד כיבוי</option>
+            </select>
+          </div>
+          <button data-cmd="ble_off">כבה BLE</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>המיקום של "אני פה"</h2>
+        <dl id="fixDetails" class="details"><dt>—</dt><dd>עוד לא התקבל מיקום</dd></dl>
+      </div>
+
+      <div class="card">
+        <h2>קשר LoRa</h2>
+        <div class="rate">
+          <label class="switch"><input type="checkbox" id="adaptive"><span>קצב אדפטיבי</span></label>
+          <label>עוצמת שידור
+            <select id="power">
+              <option>2</option><option>8</option><option selected>14</option><option>20</option><option>22</option>
+            </select> dBm
+          </label>
+        </div>
+        <dl id="linkDetails" class="details"><dt>—</dt><dd>אין נתונים</dd></dl>
+      </div>
+
+      <details class="card log">
+        <summary>לוג</summary>
+        <div id="log"></div>
+      </details>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
