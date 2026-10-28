@@ -372,6 +372,51 @@ function renderLink() {
   if (rows.length) setDetails($('linkDetails'), rows);
 }
 
+// ================================================================ command buttons
+// Blue idle -> yellow while waiting for ImHere -> green (answered) / red (no answer) for 10 s -> blue
+const CMD_OF = { PING: 'ping', GET_LAST: 'get_last', GPS_FIX: 'gps_fix', BLE_ON: 'ble_on', BLE_OFF: 'ble_off' };
+const CMD_TIMEOUT_S = 45;  // 3 attempts at the slowest rate take ~30 s
+const RESULT_SHOW_MS = 10000;
+const cmdState = {};       // cmd -> { pending, timer, reset }
+
+function setBtnState(cmd, state) {
+  const b = document.querySelector(`[data-cmd="${cmd}"]`);
+  if (!b) return;
+  b.classList.remove('pending', 'ok', 'fail');
+  if (state) b.classList.add(state);
+}
+
+function cmdStart(cmd, timeoutS = CMD_TIMEOUT_S) {
+  const st = cmdState[cmd] || (cmdState[cmd] = {});
+  clearTimeout(st.timer);
+  clearTimeout(st.reset);
+  st.pending = true;
+  setBtnState(cmd, 'pending');
+  st.timer = setTimeout(() => cmdDone(cmd, false, 'אין תשובה בזמן סביר'), timeoutS * 1000);
+}
+
+function cmdExtend(cmd, timeoutS) {
+  const st = cmdState[cmd];
+  if (!st?.pending) return;
+  clearTimeout(st.timer);
+  st.timer = setTimeout(() => cmdDone(cmd, false, 'אין תשובה בזמן סביר'), timeoutS * 1000);
+}
+
+function cmdDone(cmd, ok, why = '') {
+  const st = cmdState[cmd];
+  if (!st) return;  // never pressed in this session
+  clearTimeout(st.timer);
+  clearTimeout(st.reset);
+  st.pending = false;
+  setBtnState(cmd, ok ? 'ok' : 'fail');
+  if (!ok && why) log(`✗ ${cmd}: ${why}`);
+  st.reset = setTimeout(() => setBtnState(cmd, null), RESULT_SHOW_MS);
+}
+
+function failAllPending(why) {
+  Object.keys(cmdState).forEach((c) => { if (cmdState[c].pending) cmdDone(c, false, why); });
+}
+
 // ================================================================ board events
 function onEvent(e) {
   switch (e.ev) {
@@ -390,18 +435,27 @@ function onEvent(e) {
     case 'flags': lastFlags = e.v; renderLink(); break;
     case 'failed':
       chip('chipNode', 'bad', `אני פה: לא עונה (${e.cmd})`);
+      if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '"אני פה" לא ענה');
       break;
     case 'ack': {
       const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳, התוצאה תגיע לבד`
         : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי') : '';
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
+      // GPS check stays yellow until the search result is pushed
+      if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + 60); else cmdDone('gps_fix', false, 'נדחה'); }
+      else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], e.status === 0, 'נדחה');
       break;
     }
     case 'pong':
       log(`✓ פינג: זמן פעולה ${fmtDur(e.uptime)}${e.ble_left ? `, BLE עוד ${fmtDur(e.ble_left)}` : ''}${e.batt_mv ? `, סוללה ${(e.batt_mv / 1000).toFixed(2)}V` : ''}`);
       lastFlags = e.flags; renderLink();
+      cmdDone('ping', true);
       break;
-    case 'loc': showLocation(e); break;
+    case 'loc':
+      showLocation(e);
+      if (e.fresh) cmdDone('gps_fix', e.has_fix, 'החיפוש הסתיים בלי מיקום');
+      else cmdDone('get_last', true);
+      break;
   }
 }
 
@@ -478,11 +532,18 @@ function onClosed(link) {
   chip('chipDongle', 'bad', 'איפה אתה: נותק');
   $('chipBusy').hidden = true;
   log('החיבור ל"איפה אתה" נותק');
+  failAllPending('החיבור ל"איפה אתה" נותק');
 }
 
 async function send(cmd) {
-  if (!S.link) return;
-  try { await S.link.send(cmd); } catch (err) { log(`שליחה נכשלה: ${err?.message || err}`); }
+  if (!S.link) return false;
+  try {
+    await S.link.send(cmd);
+    return true;
+  } catch (err) {
+    log(`שליחה נכשלה: ${err?.message || err}`);
+    return false;
+  }
 }
 
 let wakeLock = null;
@@ -541,11 +602,12 @@ function init() {
   };
 
   document.querySelectorAll('[data-cmd]').forEach((b) => {
-    b.onclick = () => {
+    b.onclick = async () => {
       const c = b.dataset.cmd;
-      if (c === 'gps_fix') send(`gps_fix ${$('gpsTimeout').value}`);
-      else if (c === 'ble_on') send(`ble_on ${$('bleMinutes').value}`);
-      else send(c);
+      cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + 60 : CMD_TIMEOUT_S);
+      const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value}`
+        : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}` : c;
+      if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל"איפה אתה"');
     };
   });
   $('adaptive').onchange = (e) => send(`adaptive ${e.target.checked ? 1 : 0}`);

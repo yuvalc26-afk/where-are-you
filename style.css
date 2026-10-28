@@ -122,6 +122,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .distance { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 
 /* ---------- actions ---------- */
+/* Command buttons: blue idle, yellow waiting for ImHere, green answered, red no answer */
+button[data-cmd] { background: #2563eb; color: #fff; border-color: #2563eb; transition: background .2s, border-color .2s; }
+button[data-cmd].pending { background: #facc15; border-color: #eab308; color: #422006; }
+button[data-cmd].ok { background: #16a34a; border-color: #15803d; color: #fff; }
+button[data-cmd].fail { background: #dc2626; border-color: #b91c1c; color: #fff; }
+button[data-cmd].pending::after { content: " ⏳"; }
+button[data-cmd].ok::after { content: " ✓"; }
+button[data-cmd].fail::after { content: " ✗"; }
 .actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .combo { display: flex; gap: 6px; }
 .combo button { flex: 1; }
