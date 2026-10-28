@@ -282,7 +282,7 @@ function log(msg) {
 }
 
 function setConnected(on) {
-  document.querySelectorAll('[data-cmd], #adaptive, #power').forEach((b) => { b.disabled = !on; });
+  document.querySelectorAll('[data-cmd], #power').forEach((b) => { b.disabled = !on; });
   $('btnDisconnect').hidden = !on;
   ['btnBle', 'btnUsb', 'btnDemo'].forEach((id) => { $(id).style.display = on ? 'none' : ''; });
 }
@@ -423,7 +423,6 @@ function onEvent(e) {
     case 'log': log(e.msg); break;
     case 'busy': $('chipBusy').hidden = !e.on; break;
     case 'status':
-      $('adaptive').checked = !!e.adaptive;
       $('power').value = String(e.dbm);
       break;
     case 'profile': lastProfile = e; renderLink(); break;
@@ -610,7 +609,6 @@ function init() {
       if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל"איפה אתה"');
     };
   });
-  $('adaptive').onchange = (e) => send(`adaptive ${e.target.checked ? 1 : 0}`);
   $('power').onchange = (e) => send(`power ${e.target.value}`);
 
   setConnected(false);
