@@ -413,10 +413,14 @@ async function connect(LinkClass, device = null) {
     await link.connect(onEvent, () => onClosed(link), (state) => onLinkState(link, state));
   } catch (err) {
     chip('chipDongle', 'off', 'איפה אתה: לא מחובר');
-    if (err?.name !== 'NotFoundError') log(`החיבור נכשל: ${err?.message || err}`);
+    const msg = err?.message || String(err);
+    log(`החיבור נכשל: ${err?.name || ''} ${msg}`);
+    // NotFoundError also covers "Bluetooth adapter not available"; only a closed chooser is silent
+    if (!(err?.name === 'NotFoundError' && /cancel/i.test(msg))) showNotice(bleHint(err));
     return false;
   }
   S.link = link;
+  hideNotice();
   chip('chipDongle', 'ok', `איפה אתה: מחובר (${link.label})`);
   chip('chipNode', 'off', 'אני פה: לא ידוע — לחץ פינג');
   setConnected(true);
@@ -424,6 +428,21 @@ async function connect(LinkClass, device = null) {
   keepScreenOn();
   send('status');  // board state only, nothing is transmitted over LoRa
   return true;
+}
+
+function showNotice(text) { const n = $('notice'); n.textContent = text; n.hidden = false; }
+function hideNotice() { $('notice').hidden = true; }
+
+function bleHint(err) {
+  const m = `${err?.name || ''} ${err?.message || ''}`;
+  if (/adapter not available|bluetooth.*(off|disabled)|no bluetooth/i.test(m)) {
+    return 'ה-Bluetooth בטלפון כבוי או לא זמין. הדלק Bluetooth ומיקום (GPS) בטלפון ונסה שוב.';
+  }
+  if (/globally disabled|not allowed|permission|denied|SecurityError|NotAllowedError/i.test(m)) {
+    return 'ל-Chrome אין הרשאה ל-Bluetooth. בהגדרות הטלפון ← אפליקציות ← Chrome ← הרשאות: '
+      + 'לאפשר "מכשירים בקרבת מקום" ו"מיקום". ובהגדרות האתר ב-Chrome (סמל המנעול) לאפשר Bluetooth.';
+  }
+  return `החיבור ל-Bluetooth נכשל: ${err?.message || err}. ודא ש-Bluetooth ומיקום דולקים בטלפון.`;
 }
 
 function onLinkState(link, state) {
@@ -496,12 +515,21 @@ function startCompass() {
 
 // ================================================================ wiring
 function init() {
-  if (!navigator.bluetooth) {
-    $('btnBle').disabled = true;
-    $('btnBle').title = 'Web Bluetooth לא זמין: פתח ב-Chrome, דרך https או localhost';
-  }
   if (navigator.serial) $('btnUsb').hidden = false;
-  $('btnBle').onclick = () => connect(BleLink);
+  $('btnBle').onclick = async () => {
+    hideNotice();
+    if (!window.isSecureContext) return showNotice('הדף חייב להיפתח בכתובת https:// כדי להשתמש ב-Bluetooth.');
+    if (!navigator.bluetooth) {
+      return showNotice('הדפדפן הזה לא תומך ב-Bluetooth מדף אינטרנט. פתח את הקישור ב-Chrome '
+        + '(לא מתוך WhatsApp / Gmail / Facebook, ולא ב-Samsung Internet או Firefox).');
+    }
+    try {
+      if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability())) {
+        return showNotice('ה-Bluetooth בטלפון כבוי או לא זמין. הדלק Bluetooth (וגם מיקום) ונסה שוב.');
+      }
+    } catch { /* not supported: just try */ }
+    connect(BleLink);
+  };
   $('btnUsb').onclick = () => connect(SerialLink);
   $('btnDemo').onclick = () => connect(DemoLink);
   $('btnDisconnect').onclick = () => S.link?.disconnect();
