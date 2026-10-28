@@ -141,7 +141,7 @@ class DemoLink {
     this.emit({ ev: 'link', up_rssi: -112, up_snr: -3.5, down_rssi: -110, down_snr: -2.75, margin: 16.5, profile: this.state.profile });
     this.emit({ ev: 'flags', v: FLAG.HAS_FIX | FLAG.TIME_VALID | (this.state.ble ? FLAG.BLE_ON : 0) });
   }
-  loc(fresh) {
+  loc(fresh, avg = 5) {
     const now = Math.floor(Date.now() / 1000);
     const jitter = () => (Math.random() - 0.5) * 0.0004;
     if (fresh) this.state.fixAt = Date.now();
@@ -149,7 +149,7 @@ class DemoLink {
       ev: 'loc', fresh, has_fix: true, job: 0, lat: this.base.lat + jitter(), lon: this.base.lon + jitter(), alt: 18.4,
       fix_unix: Math.floor(this.state.fixAt / 1000), now_unix: now, age: Math.floor((Date.now() - this.state.fixAt) / 1000),
       hdop: 1.1, pdop: 1.9, vdop: 1.6, speed: 0, course: 0, ttff: 4, search: 9, used: 8, view: 12, tracked: 9,
-      cn0max: 42, cn0avg: 38, fix_type: 3, quality: 1, uptime: 3600, flags: 9, rssi: -110, snr: -2.75,
+      cn0max: 42, cn0avg: 38, fix_type: 3, quality: 1, uptime: 3600, flags: 9, rssi: -110, snr: -2.75, avg,
     });
   }
   profile() {
@@ -172,7 +172,8 @@ class DemoLink {
     else if (cmd === 'get_last') this.later(1500, () => { this.link(); this.loc(false); busy(false); });
     else if (cmd === 'gps_fix') {
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: 'GPS_FIX', status: 0, param: Number(arg) || 120 }); busy(false); });
-      this.later(5000, () => { log('← GPS result pushed by node (demo)'); this.loc(true); });
+      const settle = Number(line.split(' ')[2]) || 5;
+      this.later(Math.min(3000 + settle * 100, 9000), () => { log('← GPS result pushed by node (demo)'); this.loc(true, settle); });
     } else if (cmd === 'ble_on' || cmd === 'ble_off') {
       this.state.ble = cmd === 'ble_on';
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: cmd.toUpperCase(), status: 0, param: Number(arg) || 0 }); busy(false); });
@@ -292,7 +293,8 @@ function updateNav() {
   if (!S.node) return;
   const ageS = S.node.age + (Date.now() - S.node.receivedAt) / 1000;
   const accM = S.node.hdop * NEO6M_CEP_M;
-  $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)} · דיוק ~${accM < 10 ? accM.toFixed(1) : Math.round(accM)} מ׳`;
+  const avg = S.node.avg > 1 ? ` · ממוצע של ${S.node.avg} מדידות` : '';
+  $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)} · דיוק ~${accM < 10 ? accM.toFixed(1) : Math.round(accM)} מ׳${avg}`;
   $('btnNavigate').hidden = false;
   $('btnNavigate').href = `https://www.google.com/maps/dir/?api=1&destination=${S.node.lat.toFixed(6)},${S.node.lon.toFixed(6)}`;
   if (!S.phone) {
@@ -337,6 +339,7 @@ function renderNode(fit) {
     ['סטטוס', `${esc(JOB_TEXT[e.job] ?? e.job)} <span class="badge ${e.fresh ? 'fresh' : ''}">${e.fresh ? 'חדש' : 'שמור'}</span>`],
     ['קואורדינטות', `${e.lat.toFixed(6)}, ${e.lon.toFixed(6)}`],
     ['דיוק משוער', `~${(e.hdop * NEO6M_CEP_M).toFixed(1)} מ׳`],
+    ['מיצוע', e.avg ? `${e.avg} מדידות` : '—'],
     ['גובה', `${e.alt} מ׳`],
     ['זמן המדידה', fmtTime(e.fix_unix)],
     ['לוויינים', `${e.used} בשימוש / ${e.view} בטווח ראייה / ${e.tracked} במעקב`],
@@ -442,7 +445,7 @@ function onEvent(e) {
         : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי') : '';
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
       // GPS check stays yellow until the search result is pushed
-      if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + 60); else cmdDone('gps_fix', false, 'נדחה'); }
+      if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsMode').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
       else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], e.status === 0, 'נדחה');
       break;
     }
@@ -604,8 +607,9 @@ function init() {
   document.querySelectorAll('[data-cmd]').forEach((b) => {
     b.onclick = async () => {
       const c = b.dataset.cmd;
-      cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + 60 : CMD_TIMEOUT_S);
-      const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value}`
+      const settle = Number($('gpsMode').value);
+      cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + settle + 60 : CMD_TIMEOUT_S);
+      const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value} ${settle}`
         : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}` : c;
       if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל"איפה אתה"');
     };

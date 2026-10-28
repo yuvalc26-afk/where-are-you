@@ -133,7 +133,8 @@ button[data-cmd].fail::after { content: " ✗"; }
 .actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .combo { display: flex; gap: 6px; }
 .combo button { flex: 1; }
-.combo select { flex: none; width: 104px; }
+.combo select { flex: none; width: 96px; padding-inline: 6px; }
+.combo button { min-width: 0; }
 
 /* ---------- details ---------- */
 .details { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
