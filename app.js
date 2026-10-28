@@ -291,7 +291,8 @@ function updateNav() {
   const arrow = $('arrow');
   if (!S.node) return;
   const ageS = S.node.age + (Date.now() - S.node.receivedAt) / 1000;
-  $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)}`;
+  const accM = S.node.hdop * NEO6M_CEP_M;
+  $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)} · דיוק ~${accM < 10 ? accM.toFixed(1) : Math.round(accM)} מ׳`;
   $('btnNavigate').hidden = false;
   $('btnNavigate').href = `https://www.google.com/maps/dir/?api=1&destination=${S.node.lat.toFixed(6)},${S.node.lon.toFixed(6)}`;
   if (!S.phone) {
