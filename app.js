@@ -386,7 +386,7 @@ const cmdState = {};       // cmd -> { pending, timer, reset }
 function setBtnState(cmd, state) {
   const b = document.querySelector(`[data-cmd="${cmd}"]`);
   if (!b) return;
-  b.classList.remove('pending', 'ok', 'fail');
+  b.classList.remove('pending', 'ok', 'fail', 'running');
   if (state) b.classList.add(state);
 }
 
@@ -415,6 +415,44 @@ function cmdDone(cmd, ok, why = '') {
   setBtnState(cmd, ok ? 'ok' : 'fail');
   if (!ok && why) log(`✗ ${cmd}: ${why}`);
   st.reset = setTimeout(() => setBtnState(cmd, null), RESULT_SHOW_MS);
+}
+
+// Buzzer countdown: starts at the ACK (ImHere starts buzzing right after sending it)
+const buzz = { endAt: 0, tick: null };
+const fmtClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+function buzzLabel(text) {
+  const b = document.querySelector('[data-cmd="buzz"]');
+  if (!b) return;
+  b.dataset.label ??= b.textContent;
+  b.textContent = text ?? b.dataset.label;
+}
+
+function buzzCountdown(seconds) {
+  const st = cmdState.buzz || (cmdState.buzz = {});
+  clearTimeout(st.timer);
+  clearTimeout(st.reset);
+  st.pending = false;
+  clearInterval(buzz.tick);
+  buzz.endAt = Date.now() + seconds * 1000;
+  setBtnState('buzz', 'running');
+  const update = () => {
+    const left = Math.ceil((buzz.endAt - Date.now()) / 1000);
+    if (left > 0) { buzzLabel(`מצפצף… ${fmtClock(left)}`); return; }
+    buzzStop();
+    log('🔔 הצפצוף הסתיים');
+    try { navigator.vibrate?.([200, 100, 200]); } catch { /* not supported */ }
+    cmdDone('buzz', true);
+  };
+  update();
+  buzz.tick = setInterval(update, 500);
+  log(`🔊 "אני פה" מצפצף ${seconds >= 60 ? fmtDur(seconds) : `${seconds} ש׳`}`);
+}
+
+function buzzStop() {
+  clearInterval(buzz.tick);
+  buzz.tick = null;
+  buzzLabel(null);
 }
 
 function failAllPending(why) {
@@ -447,7 +485,10 @@ function onEvent(e) {
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
       // GPS check stays yellow until the search result is pushed
       if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsMode').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
-      else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], e.status === 0, 'נדחה');
+      else if (e.cmd === 'BUZZ' && e.status === 0) {
+        if (e.param > 0) buzzCountdown(e.param);
+        else { buzzStop(); cmdDone('buzz', true); }
+      } else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], e.status === 0, 'נדחה');
       break;
     }
     case 'pong':
@@ -608,6 +649,7 @@ function init() {
   document.querySelectorAll('[data-cmd]').forEach((b) => {
     b.onclick = async () => {
       const c = b.dataset.cmd;
+      if (c === 'buzz') buzzStop();  // a new press replaces a running countdown
       const settle = Number($('gpsMode').value);
       cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + settle + 60 : CMD_TIMEOUT_S);
       const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value} ${settle}`

@@ -127,6 +127,8 @@ button[data-cmd] { background: #2563eb; color: #fff; border-color: #2563eb; tran
 button[data-cmd].pending { background: #facc15; border-color: #eab308; color: #422006; }
 button[data-cmd].ok { background: #16a34a; border-color: #15803d; color: #fff; }
 button[data-cmd].fail { background: #dc2626; border-color: #b91c1c; color: #fff; }
+button[data-cmd].running { background: #f97316; border-color: #ea580c; color: #fff; animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { filter: brightness(1.15); } }
 button[data-cmd].pending::after { content: " ⏳"; }
 button[data-cmd].ok::after { content: " ✓"; }
 button[data-cmd].fail::after { content: " ✗"; }
