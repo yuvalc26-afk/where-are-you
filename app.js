@@ -211,8 +211,8 @@ const nodeCircle = L.circle([0, 0], { radius: 5, color: '#dc2626', weight: 1, fi
 const phoneMarker = L.marker([0, 0], { icon: phoneIcon });
 const phoneCircle = L.circle([0, 0], { radius: 10, color: '#2563eb', weight: 1, fillOpacity: 0.1 });
 const joinLine = L.polyline([], { color: '#64748b', weight: 2, dashArray: '6 6' });
-nodeMarker.bindTooltip('אני פה', { permanent: true, direction: 'top', offset: [0, -10], className: 'pin-label' });
-phoneMarker.bindTooltip('אני', { permanent: true, direction: 'top', offset: [0, -10], className: 'pin-label' });
+nodeMarker.bindTooltip('I_M_Here', { permanent: true, direction: 'top', offset: [0, -10], className: 'pin-label' });
+phoneMarker.bindTooltip('הפלאפון שלי', { permanent: true, direction: 'top', offset: [0, -10], className: 'pin-label' });
 
 function fitBoth() {
   const pts = [];
@@ -309,7 +309,7 @@ function updateNav() {
   arrow.classList.remove('unknown');
   if (S.heading != null) {
     arrow.style.transform = `rotate(${b - S.heading}deg)`;
-    $('bearing').textContent = `${compassName(b)} (${Math.round(b)}°) · החץ מצביע לכיוון "אני פה"`;
+    $('bearing').textContent = `${compassName(b)} (${Math.round(b)}°) · החץ מצביע לכיוון ⁨I_M_Here⁩`;
   } else {
     arrow.style.transform = `rotate(${b}deg)`;
     $('bearing').textContent = `${compassName(b)} (${Math.round(b)}°) · צפון למעלה`;
@@ -446,7 +446,7 @@ function buzzCountdown(seconds) {
   };
   update();
   buzz.tick = setInterval(update, 500);
-  log(`🔊 "אני פה" מצפצף ${seconds >= 60 ? fmtDur(seconds) : `${seconds} ש׳`}`);
+  log(`🔊 ⁨I_M_Here⁩ מצפצף ${seconds >= 60 ? fmtDur(seconds) : `${seconds} ש׳`}`);
 }
 
 function buzzStop() {
@@ -471,17 +471,17 @@ function onEvent(e) {
     case 'link':
       lastLink = e;
       renderLink();
-      chip('chipNode', 'ok', `אני פה: עונה · ${new Date().toLocaleTimeString('he-IL', { hour12: false })}`);
+      chip('chipNode', 'ok', `⁨I_M_Here⁩: עונה · ${new Date().toLocaleTimeString('he-IL', { hour12: false })}`);
       break;
     case 'flags': lastFlags = e.v; renderLink(); break;
     case 'failed':
-      chip('chipNode', 'bad', `אני פה: לא עונה (${e.cmd})`);
-      if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '"אני פה" לא ענה');
+      chip('chipNode', 'bad', `⁨I_M_Here⁩: לא עונה (${e.cmd})`);
+      if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '⁨I_M_Here⁩ לא ענה');
       break;
     case 'ack': {
       const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳, התוצאה תגיע לבד`
         : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי')
-        : e.cmd === 'BUZZ' ? (e.status === 0 ? (e.param ? ` · מצפצף ${e.param} ש׳` : ' · הצפצוף הופסק') : ' · אין זמזם מוגדר ב"אני פה"') : '';
+        : e.cmd === 'BUZZ' ? (e.status === 0 ? (e.param ? ` · מצפצף ${e.param} ש׳` : ' · הצפצוף הופסק') : ' · אין זמזם מוגדר ב-⁨I_M_Here⁩') : '';
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
       // GPS check stays yellow until the search result is pushed
       if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsMode').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
@@ -521,7 +521,7 @@ async function connect(LinkClass, device = null) {
   S.link = link;
   hideNotice();
   chip('chipDongle', 'ok', `איפה אתה: מחובר (${link.label})`);
-  chip('chipNode', 'off', 'אני פה: לא ידוע — לחץ פינג');
+  chip('chipNode', 'off', '⁨I_M_Here⁩: לא ידוע — לחץ פינג');
   setConnected(true);
   log(`מחובר ל"איפה אתה" דרך ${link.label}`);
   keepScreenOn();
