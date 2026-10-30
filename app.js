@@ -507,11 +507,11 @@ function onEvent(e) {
 // ================================================================ connection
 async function connect(LinkClass, device = null) {
   const link = new LinkClass(device);
-  chip('chipDongle', 'wait', 'איפה אתה: מתחבר…');
+  chip('chipDongle', 'wait', '⁨Where R U?⁩: מתחבר…');
   try {
     await link.connect(onEvent, () => onClosed(link), (state) => onLinkState(link, state));
   } catch (err) {
-    chip('chipDongle', 'off', 'איפה אתה: לא מחובר');
+    chip('chipDongle', 'off', '⁨Where R U?⁩: לא מחובר');
     const msg = err?.message || String(err);
     log(`החיבור נכשל: ${err?.name || ''} ${msg}`);
     // NotFoundError also covers "Bluetooth adapter not available"; only a closed chooser is silent
@@ -520,10 +520,10 @@ async function connect(LinkClass, device = null) {
   }
   S.link = link;
   hideNotice();
-  chip('chipDongle', 'ok', `איפה אתה: מחובר (${link.label})`);
+  chip('chipDongle', 'ok', `⁨Where R U?⁩: מחובר (${link.label})`);
   chip('chipNode', 'off', '⁨I_M_Here⁩: לא ידוע — לחץ פינג');
   setConnected(true);
-  log(`מחובר ל"איפה אתה" דרך ${link.label}`);
+  log(`מחובר ל-⁨Where R U?⁩ דרך ${link.label}`);
   keepScreenOn();
   send('status');  // board state only, nothing is transmitted over LoRa
   return true;
@@ -547,10 +547,10 @@ function bleHint(err) {
 function onLinkState(link, state) {
   if (S.link !== link) return;
   if (state === 'reconnecting') {
-    chip('chipDongle', 'wait', 'איפה אתה: החיבור נפל, מתחבר מחדש…');
+    chip('chipDongle', 'wait', '⁨Where R U?⁩: החיבור נפל, מתחבר מחדש…');
     log('חיבור ה-BLE נפל — מנסה להתחבר מחדש');
   } else if (state === 'connected') {
-    chip('chipDongle', 'ok', `איפה אתה: מחובר (${link.label})`);
+    chip('chipDongle', 'ok', `⁨Where R U?⁩: מחובר (${link.label})`);
     log('חיבור ה-BLE חזר');
     send('status');
   }
@@ -563,7 +563,7 @@ async function autoConnect() {
   try { devices = await navigator.bluetooth.getDevices(); } catch { return; }
   const dev = devices.find((d) => d.name?.startsWith('WhereAreYou'));
   if (!dev) return;
-  log('מתחבר אוטומטית ל"איפה אתה" שחובר קודם…');
+  log('מתחבר אוטומטית ל-⁨Where R U?⁩ שחובר קודם…');
   for (let i = 0; i < 3 && !S.link; i++) {
     if (await connect(BleLink, dev)) return;
     await sleep(2000);
@@ -574,10 +574,10 @@ function onClosed(link) {
   if (S.link !== link) return;
   S.link = null;
   setConnected(false);
-  chip('chipDongle', 'bad', 'איפה אתה: נותק');
+  chip('chipDongle', 'bad', '⁨Where R U?⁩: נותק');
   $('chipBusy').hidden = true;
-  log('החיבור ל"איפה אתה" נותק');
-  failAllPending('החיבור ל"איפה אתה" נותק');
+  log('החיבור ל-⁨Where R U?⁩ נותק');
+  failAllPending('החיבור ל-⁨Where R U?⁩ נותק');
 }
 
 async function send(cmd) {
@@ -655,7 +655,7 @@ function init() {
       const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value} ${settle}`
         : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}`
         : c === 'buzz' ? `buzz ${$('buzzSeconds').value}` : c;
-      if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל"איפה אתה"');
+      if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל-⁨Where R U?⁩');
     };
   });
   $('power').onchange = (e) => send(`power ${e.target.value}`);
