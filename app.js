@@ -174,8 +174,8 @@ class DemoLink {
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: 'GPS_FIX', status: 0, param: Number(arg) || 120 }); busy(false); });
       const settle = Number(line.split(' ')[2]) || 5;
       this.later(Math.min(3000 + settle * 100, 9000), () => { log('← GPS result pushed by node (demo)'); this.loc(true, settle); });
-    } else if (cmd === 'ble_on' || cmd === 'ble_off') {
-      this.state.ble = cmd === 'ble_on';
+    } else if (cmd === 'ble_on' || cmd === 'ble_off' || cmd === 'buzz') {
+      if (cmd !== 'buzz') this.state.ble = cmd === 'ble_on';
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: cmd.toUpperCase(), status: 0, param: Number(arg) || 0 }); busy(false); });
     } else if (cmd === 'adaptive') {
       this.state.adaptive = arg === '1';
@@ -378,7 +378,7 @@ function renderLink() {
 
 // ================================================================ command buttons
 // Blue idle -> yellow while waiting for ImHere -> green (answered) / red (no answer) for 10 s -> blue
-const CMD_OF = { PING: 'ping', GET_LAST: 'get_last', GPS_FIX: 'gps_fix', BLE_ON: 'ble_on', BLE_OFF: 'ble_off' };
+const CMD_OF = { PING: 'ping', GET_LAST: 'get_last', GPS_FIX: 'gps_fix', BLE_ON: 'ble_on', BLE_OFF: 'ble_off', BUZZ: 'buzz' };
 const CMD_TIMEOUT_S = 45;  // 3 attempts at the slowest rate take ~30 s
 const RESULT_SHOW_MS = 10000;
 const cmdState = {};       // cmd -> { pending, timer, reset }
@@ -442,7 +442,8 @@ function onEvent(e) {
       break;
     case 'ack': {
       const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳, התוצאה תגיע לבד`
-        : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי') : '';
+        : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי')
+        : e.cmd === 'BUZZ' ? (e.status === 0 ? (e.param ? ` · מצפצף ${e.param} ש׳` : ' · הצפצוף הופסק') : ' · אין זמזם מוגדר ב"אני פה"') : '';
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
       // GPS check stays yellow until the search result is pushed
       if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsMode').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
@@ -610,7 +611,8 @@ function init() {
       const settle = Number($('gpsMode').value);
       cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + settle + 60 : CMD_TIMEOUT_S);
       const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value} ${settle}`
-        : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}` : c;
+        : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}`
+        : c === 'buzz' ? `buzz ${$('buzzSeconds').value}` : c;
       if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל"איפה אתה"');
     };
   });
