@@ -134,7 +134,7 @@ class DemoLink {
     this.emit = onEvent;
     this.onClose = onClose;
     this.base = { lat: 32.0997, lon: 34.8122 };  // Yarkon Park, Tel Aviv
-    this.state = { adaptive: false, dbm: 14, profile: 0, ble: false, fixAt: Date.now() - 95000 };
+    this.state = { adaptive: false, dbm: 22, profile: 0, ble: false, fixAt: Date.now() - 95000 };
   }
   later(ms, fn) { setTimeout(fn, ms); }
   link() {
