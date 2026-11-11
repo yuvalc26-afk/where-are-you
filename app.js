@@ -362,8 +362,8 @@ function renderLink() {
   const rows = [];
   if (lastProfile) rows.push(['קצב', `#${lastProfile.idx} · ${esc(lastProfile.name)} · ${lastProfile.bps} bit/s`]);
   if (lastLink) {
-    rows.push(['היחידה שומעת אותנו', `RSSI ${lastLink.up_rssi} dBm · SNR ${lastLink.up_snr} dB`]);
-    rows.push(['אנחנו שומעים אותה', `RSSI ${lastLink.down_rssi} dBm · SNR ${lastLink.down_snr} dB`]);
+    rows.push(['קליטה ב-⁨Where R U?⁩', `RSSI ${lastLink.down_rssi} dBm · SNR ${lastLink.down_snr} dB`]);
+    rows.push(['קליטה ב-⁨I_M_Here⁩', `RSSI ${lastLink.up_rssi} dBm · SNR ${lastLink.up_snr} dB`]);
     rows.push(['מרווח SNR', `${lastLink.margin} dB`]);
   }
   if (lastFlags != null) {
@@ -438,9 +438,16 @@ function paintScore(el, s) {
   el.style.color = s ? '#fff' : '';
 }
 
+// no answer: neither side has a reading for this exchange
+function clearQuality() {
+  ['qUp', 'qDown'].forEach((id) => { $(id).textContent = '— אין תשובה'; });
+  paintScore($('qUpScore'), null);
+  paintScore($('qDownScore'), null);
+}
+
 function renderQuality(e) {
-  $('qUp').textContent = `${Math.round(e.up_rssi)} dBm · SNR ${e.up_snr.toFixed(1)}`;
-  $('qDown').textContent = `${Math.round(e.down_rssi)} dBm · SNR ${e.down_snr.toFixed(1)}`;
+  $('qUp').innerHTML = `<b>${Math.round(e.up_rssi)} dBm</b><small>SNR ${e.up_snr.toFixed(1)} dB</small>`;
+  $('qDown').innerHTML = `<b>${Math.round(e.down_rssi)} dBm</b><small>SNR ${e.down_snr.toFixed(1)} dB</small>`;
   paintScore($('qUpScore'), linkScore(e.up_rssi, e.up_snr));
   paintScore($('qDownScore'), linkScore(e.down_rssi, e.down_snr));
 }
@@ -511,8 +518,8 @@ const pingLoop = {
     const l = this.link;
     $('pingStats').innerHTML =
       `<div><b>נשלחו ${this.sent} · התקבלו ${this.got}</b> (${pct}%)${this.running ? ' · פועל' : ' · עצור'}</div>`
-      + `<div>⬆ שידור: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
-      + `<div>⬇ קליטה: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`
+      + `<div>קליטה ב-⁨Where R U?⁩: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`
+      + `<div>קליטה ב-⁨I_M_Here⁩: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
       + rf.html();
   },
 };
@@ -729,6 +736,7 @@ function onEvent(e) {
       break;
     case 'failed':
       chip('chipNode', 'bad', `⁨I_M_Here⁩: לא עונה (${e.cmd})`);
+      clearQuality();
       if (e.cmd === 'PING' && pingLoop.running) pingLoop.result(false);
       else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '⁨I_M_Here⁩ לא ענה');
       break;

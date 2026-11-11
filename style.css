@@ -137,8 +137,9 @@ button.loop { flex: none; width: 128px; background: var(--bg); }
 button.loop.on { background: #7c3aed; border-color: #6d28d9; color: #fff; animation: pulse 1s ease-in-out infinite; }
 .linkq { display: grid; gap: 4px; font-size: 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 .q-row { display: flex; align-items: center; gap: 8px; }
-.q-dir { width: 64px; flex: none; color: var(--muted); }
-.q-val { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; direction: ltr; text-align: right; }
+.q-dir { width: 128px; flex: none; color: var(--muted); font-size: 13px; }
+.q-val { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; direction: ltr; text-align: right; display: grid; line-height: 1.2; }
+.q-val small { color: var(--muted); font-size: 12px; }
 .q-score { flex: none; min-width: 52px; text-align: center; font-weight: 700; border-radius: 999px; padding: 2px 8px;
   background: var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
 .ping-stats { font-size: 14px; padding: 8px 10px; border-radius: 10px; background: var(--bg); border: 1px dashed var(--line);
