@@ -890,7 +890,11 @@ function startCompass() {
 }
 
 // ================================================================ wiring
+// Stamped by tools/bump_web_version.py on every publish; shown in the log header
+const APP_VERSION = '2026-11-11.1953';
+
 function init() {
+  $('appVer').textContent = `גרסה ${APP_VERSION}`;
   if (navigator.serial) $('btnUsb').hidden = false;
   $('btnBle').onclick = async () => {
     hideNotice();
