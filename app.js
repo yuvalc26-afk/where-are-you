@@ -456,10 +456,10 @@ function renderQuality(e) {
 // One ping at a time: the next one goes out as soon as the previous answered or timed out
 // (Where R U? waits the worst-case answer time + ~2.8 s). Counters restart on every start.
 const pingLoop = {
-  running: false, sent: 0, got: 0, up: [], down: [], link: null, timer: null, done: null,
+  running: false, sent: 0, got: 0, closed: 0, up: [], down: [], link: null, timer: null, done: null,
   start() {
     if (!S.link) { log('אין חיבור ל-⁨Where R U?⁩'); return; }
-    Object.assign(this, { running: true, sent: 0, got: 0, up: [], down: [], link: null });
+    Object.assign(this, { running: true, sent: 0, got: 0, closed: 0, up: [], down: [], link: null });
     $('btnPingLoop').classList.add('on');
     $('btnPingLoop').textContent = 'עצור ■';
     $('pingStats').hidden = false;
@@ -499,6 +499,7 @@ const pingLoop = {
   result(ok, quiet = false) {
     if (!this.done) return;
     clearTimeout(this.timer);
+    if (!quiet) this.closed++;  // stopped mid-wait: that ping never got a verdict
     if (ok) {
       this.got++;
       if (this.link) {
@@ -507,17 +508,18 @@ const pingLoop = {
         rf.add(this.link);
       }
     }
-    if (!quiet) this.render();
     const d = this.done;
     this.done = null;
+    if (!quiet) this.render();
     d(ok);
   },
   render() {
-    const pct = this.sent ? Math.round((100 * this.got) / this.sent) : 0;
+    // only pings that answered or timed out count; the one in flight has no verdict yet
+    const pct = this.closed ? `${Math.round((100 * this.got) / this.closed)}%` : '–';
     const avg = (a) => (a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : '–');
     const l = this.link;
     $('pingStats').innerHTML =
-      `<div><b>נשלחו ${this.sent} · התקבלו ${this.got}</b> (${pct}%)${this.running ? ' · פועל' : ' · עצור'}</div>`
+      `<div><b>נשלחו ${this.sent} · התקבלו ${this.got}</b> (${pct})${this.done ? ' · ממתין לתשובה' : this.running ? ' · פועל' : ' · עצור'}</div>`
       + `<div>קליטה ב-⁨Where R U?⁩: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`
       + `<div>קליטה ב-⁨I_M_Here⁩: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
       + rf.html();
