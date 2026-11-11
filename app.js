@@ -142,7 +142,7 @@ class DemoLink {
     this.emit({ ev: 'link', up_rssi: -112 + j(), up_snr: -3.5 + j() / 4, down_rssi: -110 + j(), down_snr: -2.75 + j() / 4, margin: 16.5, profile: this.state.profile });
     this.emit({ ev: 'flags', v: FLAG.HAS_FIX | FLAG.TIME_VALID | (this.state.ble ? FLAG.BLE_ON : 0) });
   }
-  loc(fresh, avg = 5) {
+  loc(fresh, avg = 1) {
     const now = Math.floor(Date.now() / 1000);
     const jitter = () => (Math.random() - 0.5) * 0.0004;
     if (fresh) this.state.fixAt = Date.now();
@@ -173,8 +173,8 @@ class DemoLink {
     else if (cmd === 'get_last') this.later(1500, () => { this.link(); this.loc(false); busy(false); });
     else if (cmd === 'gps_fix') {
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: 'GPS_FIX', status: 0, param: Number(arg) || 120 }); busy(false); });
-      const settle = Number(line.split(' ')[2]) || 5;
-      this.later(Math.min(3000 + settle * 100, 9000), () => { log('← GPS result pushed by node (demo)'); this.loc(true, settle); });
+      const settle = Number(line.split(' ')[2]) || 0;
+      this.later(Math.min(3000 + settle * 100, 9000), () => { log('← GPS result pushed by node (demo)'); this.loc(true, settle + 1); });
     } else if (cmd === 'ble_on' || cmd === 'ble_off' || cmd === 'buzz') {
       if (cmd !== 'buzz') this.state.ble = cmd === 'ble_on';
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: cmd.toUpperCase(), status: 0, param: Number(arg) || 0 }); busy(false); });
@@ -294,7 +294,7 @@ function updateNav() {
   if (!S.node) return;
   const ageS = S.node.age + (Date.now() - S.node.receivedAt) / 1000;
   const accM = S.node.hdop * NEO6M_CEP_M;
-  const avg = S.node.avg > 1 ? ` · ממוצע של ${S.node.avg} מדידות` : '';
+  const avg = S.node.avg > 1 ? ` · עודכן ${S.node.avg} פעמים` : '';
   $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)} · דיוק ~${accM < 10 ? accM.toFixed(1) : Math.round(accM)} מ׳${avg}`;
   $('btnNavigate').hidden = false;
   $('btnNavigate').href = `https://www.google.com/maps/dir/?api=1&destination=${S.node.lat.toFixed(6)},${S.node.lon.toFixed(6)}`;
@@ -340,7 +340,7 @@ function renderNode(fit) {
     ['סטטוס', `${esc(JOB_TEXT[e.job] ?? e.job)} <span class="badge ${e.fresh ? 'fresh' : ''}">${e.fresh ? 'חדש' : 'שמור'}</span>`],
     ['קואורדינטות', `${e.lat.toFixed(6)}, ${e.lon.toFixed(6)}`],
     ['דיוק משוער', `~${(e.hdop * NEO6M_CEP_M).toFixed(1)} מ׳`],
-    ['מיצוע', e.avg ? `${e.avg} מדידות` : '—'],
+    ['עדכונים בחיפוש', e.avg ? `${e.avg} (נשלח האחרון)` : '—'],
     ['גובה', `${e.alt} מ׳`],
     ['זמן המדידה', fmtTime(e.fix_unix)],
     ['לוויינים', `${e.used} בשימוש / ${e.view} בטווח ראייה / ${e.tracked} במעקב`],
@@ -741,12 +741,13 @@ function onEvent(e) {
       else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '⁨I_M_Here⁩ לא ענה');
       break;
     case 'ack': {
-      const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳, התוצאה תגיע לבד`
+      const win = Number($('gpsWindow').value);
+      const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳${win ? `, אחרי המיקום הראשון מעדכן עוד ${win} ש׳` : ''}, התוצאה תגיע לבד`
         : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי')
         : e.cmd === 'BUZZ' ? (e.status === 0 ? (e.param ? ` · מצפצף ${e.param} ש׳` : ' · הצפצוף הופסק') : ' · אין זמזם מוגדר ב-⁨I_M_Here⁩') : '';
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
       // GPS check stays yellow until the search result is pushed
-      if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsMode').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
+      if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsWindow').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
       else if (e.cmd === 'BUZZ' && e.status === 0) {
         if (e.param > 0) buzzCountdown(e.param);
         else { buzzStop(); cmdDone('buzz', true); }
@@ -917,7 +918,7 @@ function init() {
       if (cmdState[c]?.pending) { log('⏳ עדיין ממתין לתשובה, לא נשלח שוב'); return; }
       if (c === 'ping' && pingLoop.running) { log('פינג רצוף פועל, הפינג הבודד לא נשלח'); return; }
       if (c === 'buzz') buzzStop();  // a new press replaces a running countdown
-      const settle = Number($('gpsMode').value);
+      const settle = Number($('gpsWindow').value);
       cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + settle + 60 : CMD_TIMEOUT_S);
       const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value} ${settle}`
         : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}`
