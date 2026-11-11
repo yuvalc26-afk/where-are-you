@@ -138,7 +138,8 @@ class DemoLink {
   }
   later(ms, fn) { setTimeout(fn, ms); }
   link() {
-    this.emit({ ev: 'link', up_rssi: -112, up_snr: -3.5, down_rssi: -110, down_snr: -2.75, margin: 16.5, profile: this.state.profile });
+    const j = () => Math.round((Math.random() - 0.5) * 16);
+    this.emit({ ev: 'link', up_rssi: -112 + j(), up_snr: -3.5 + j() / 4, down_rssi: -110 + j(), down_snr: -2.75 + j() / 4, margin: 16.5, profile: this.state.profile });
     this.emit({ ev: 'flags', v: FLAG.HAS_FIX | FLAG.TIME_VALID | (this.state.ble ? FLAG.BLE_ON : 0) });
   }
   loc(fresh, avg = 5) {
@@ -379,7 +380,10 @@ function renderLink() {
 // ================================================================ command buttons
 // Blue idle -> yellow while waiting for ImHere -> green (answered) / red (no answer) for 10 s -> blue
 const CMD_OF = { PING: 'ping', GET_LAST: 'get_last', GPS_FIX: 'gps_fix', BLE_ON: 'ble_on', BLE_OFF: 'ble_off', BUZZ: 'buzz' };
-const CMD_TIMEOUT_S = 45;  // 3 attempts at the slowest rate take ~30 s
+// Until Where R U? transmits (it may still be busy with a previous command); after that its own
+// "sent" event gives the exact wait: worst-case answer time + ~2.8 s, then it reports failed.
+const CMD_TIMEOUT_S = 30;
+const BLE_SLACK_S = 2;      // event delivery over BLE
 const RESULT_SHOW_MS = 10000;
 const cmdState = {};       // cmd -> { pending, timer, reset }
 
@@ -416,6 +420,97 @@ function cmdDone(cmd, ok, why = '') {
   if (!ok && why) log(`✗ ${cmd}: ${why}`);
   st.reset = setTimeout(() => setBtnState(cmd, null), RESULT_SHOW_MS);
 }
+
+// ================================================================ link quality
+// Score 1-10 from the dB left above SF12/BW125 sensitivity (~-137 dBm). Below 0 dB SNR the packet
+// RSSI is mostly noise, so the signal is RSSI + SNR there. 0 dB left -> 1, 36 dB or more -> 10.
+const SENSITIVITY_DBM = -137;
+function linkScore(rssi, snr) {
+  const signal = snr < 0 ? rssi + snr : rssi;
+  const margin = signal - SENSITIVITY_DBM;
+  return Math.max(1, Math.min(10, Math.round(1 + margin / 4)));
+}
+const scoreColor = (s) => `hsl(${Math.round((s - 1) * 120 / 9)} 75% 42%)`;  // 1 red .. 10 green
+
+function paintScore(el, s) {
+  el.textContent = s ? `${s}/10` : '–';
+  el.style.background = s ? scoreColor(s) : '';
+  el.style.color = s ? '#fff' : '';
+}
+
+function renderQuality(e) {
+  $('qUp').textContent = `${Math.round(e.up_rssi)} dBm · SNR ${e.up_snr.toFixed(1)}`;
+  $('qDown').textContent = `${Math.round(e.down_rssi)} dBm · SNR ${e.down_snr.toFixed(1)}`;
+  paintScore($('qUpScore'), linkScore(e.up_rssi, e.up_snr));
+  paintScore($('qDownScore'), linkScore(e.down_rssi, e.down_snr));
+}
+
+// ================================================================ continuous ping
+// One ping at a time: the next one goes out as soon as the previous answered or timed out
+// (Where R U? waits the worst-case answer time + ~2.8 s). Counters restart on every start.
+const pingLoop = {
+  running: false, sent: 0, got: 0, up: [], down: [], link: null, timer: null, done: null,
+  start() {
+    if (!S.link) { log('אין חיבור ל-⁨Where R U?⁩'); return; }
+    Object.assign(this, { running: true, sent: 0, got: 0, up: [], down: [], link: null });
+    $('btnPingLoop').classList.add('on');
+    $('btnPingLoop').textContent = 'עצור ■';
+    $('pingStats').hidden = false;
+    log('▶ פינג רצוף התחיל');
+    this.render();
+    this.loop();
+  },
+  stop() {
+    if (!this.running) return;
+    this.running = false;
+    clearTimeout(this.timer);
+    this.result(false, true);
+    $('btnPingLoop').classList.remove('on');
+    $('btnPingLoop').textContent = 'פינג רצוף ▶';
+    log(`■ פינג רצוף נעצר: התקבלו ${this.got} מתוך ${this.sent}`);
+    this.render();
+  },
+  async loop() {
+    while (this.running) {
+      this.link = null;
+      const answered = new Promise((res) => { this.done = res; });
+      this.armWait(CMD_TIMEOUT_S * 1000 - BLE_SLACK_S * 1000);
+      if (!(await send('ping'))) { this.stop(); break; }
+      this.sent++;
+      this.render();
+      await answered;
+      if (this.running) await new Promise((r) => { this.timer = setTimeout(r, 300); });
+    }
+  },
+  armWait(ms) {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.result(false), ms + BLE_SLACK_S * 1000);
+  },
+  result(ok, quiet = false) {
+    if (!this.done) return;
+    clearTimeout(this.timer);
+    if (ok) {
+      this.got++;
+      if (this.link) {
+        this.up.push(linkScore(this.link.up_rssi, this.link.up_snr));
+        this.down.push(linkScore(this.link.down_rssi, this.link.down_snr));
+      }
+    }
+    if (!quiet) this.render();
+    const d = this.done;
+    this.done = null;
+    d(ok);
+  },
+  render() {
+    const pct = this.sent ? Math.round((100 * this.got) / this.sent) : 0;
+    const avg = (a) => (a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : '–');
+    const l = this.link;
+    $('pingStats').innerHTML =
+      `<div><b>נשלחו ${this.sent} · התקבלו ${this.got}</b> (${pct}%)${this.running ? ' · פועל' : ' · עצור'}</div>`
+      + `<div>⬆ שידור: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
+      + `<div>⬇ קליטה: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`;
+  },
+};
 
 // Buzzer countdown: starts at the ACK (ImHere starts buzzing right after sending it)
 const buzz = { endAt: 0, tick: null };
@@ -471,12 +566,19 @@ function onEvent(e) {
     case 'link':
       lastLink = e;
       renderLink();
+      renderQuality(e);
+      pingLoop.link = e;
       chip('chipNode', 'ok', `⁨I_M_Here⁩: עונה · ${new Date().toLocaleTimeString('he-IL', { hour12: false })}`);
       break;
     case 'flags': lastFlags = e.v; renderLink(); break;
+    case 'sent':
+      if (e.cmd === 'PING' && pingLoop.running) pingLoop.armWait(e.wait_ms);
+      else if (CMD_OF[e.cmd]) cmdExtend(CMD_OF[e.cmd], e.wait_ms / 1000 + BLE_SLACK_S);
+      break;
     case 'failed':
       chip('chipNode', 'bad', `⁨I_M_Here⁩: לא עונה (${e.cmd})`);
-      if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '⁨I_M_Here⁩ לא ענה');
+      if (e.cmd === 'PING' && pingLoop.running) pingLoop.result(false);
+      else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '⁨I_M_Here⁩ לא ענה');
       break;
     case 'ack': {
       const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳, התוצאה תגיע לבד`
@@ -494,7 +596,8 @@ function onEvent(e) {
     case 'pong':
       log(`✓ פינג: זמן פעולה ${fmtDur(e.uptime)}${e.ble_left ? `, BLE עוד ${fmtDur(e.ble_left)}` : ''}${e.batt_mv ? `, סוללה ${(e.batt_mv / 1000).toFixed(2)}V` : ''}`);
       lastFlags = e.flags; renderLink();
-      cmdDone('ping', true);
+      if (pingLoop.running) pingLoop.result(true);
+      else cmdDone('ping', true);
       break;
     case 'loc':
       showLocation(e);
@@ -578,6 +681,7 @@ function onClosed(link) {
   $('chipBusy').hidden = true;
   log('החיבור ל-⁨Where R U?⁩ נותק');
   failAllPending('החיבור ל-⁨Where R U?⁩ נותק');
+  pingLoop.stop();
 }
 
 async function send(cmd) {
@@ -649,6 +753,9 @@ function init() {
   document.querySelectorAll('[data-cmd]').forEach((b) => {
     b.onclick = async () => {
       const c = b.dataset.cmd;
+      // yellow = still waiting for the answer: don't send the same command again
+      if (cmdState[c]?.pending) { log('⏳ עדיין ממתין לתשובה, לא נשלח שוב'); return; }
+      if (c === 'ping' && pingLoop.running) { log('פינג רצוף פועל, הפינג הבודד לא נשלח'); return; }
       if (c === 'buzz') buzzStop();  // a new press replaces a running countdown
       const settle = Number($('gpsMode').value);
       cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + settle + 60 : CMD_TIMEOUT_S);
@@ -659,6 +766,7 @@ function init() {
     };
   });
   $('power').onchange = (e) => send(`power ${e.target.value}`);
+  $('btnPingLoop').onclick = () => (pingLoop.running ? pingLoop.stop() : pingLoop.start());
 
   setConnected(false);
   try {

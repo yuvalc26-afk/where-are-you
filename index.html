@@ -54,7 +54,15 @@
         <h2>פקודות</h2>
         <div class="actions">
           <button data-cmd="get_last">מיקום אחרון</button>
-          <button data-cmd="ping">פינג / בדיקת קשר</button>
+          <div class="combo">
+            <button data-cmd="ping">פינג / בדיקת קשר</button>
+            <button id="btnPingLoop" class="loop" type="button">פינג רצוף ▶</button>
+          </div>
+          <div id="linkQ" class="linkq">
+            <div class="q-row"><span class="q-dir">⬆ שידור</span><span id="qUp" class="q-val">—</span><span id="qUpScore" class="q-score">–</span></div>
+            <div class="q-row"><span class="q-dir">⬇ קליטה</span><span id="qDown" class="q-val">—</span><span id="qDownScore" class="q-score">–</span></div>
+          </div>
+          <div id="pingStats" class="ping-stats" hidden></div>
           <div class="combo">
             <button data-cmd="gps_fix">בדוק GPS עכשיו</button>
             <select id="gpsMode" aria-label="דיוק החיפוש">
