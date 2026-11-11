@@ -456,6 +456,9 @@ const pingLoop = {
     $('btnPingLoop').classList.add('on');
     $('btnPingLoop').textContent = 'עצור ■';
     $('pingStats').hidden = false;
+    $('rfTools').hidden = false;
+    rf.recent = [];
+    rf.raw = [];
     log('▶ פינג רצוף התחיל');
     this.render();
     this.loop();
@@ -494,6 +497,7 @@ const pingLoop = {
       if (this.link) {
         this.up.push(linkScore(this.link.up_rssi, this.link.up_snr));
         this.down.push(linkScore(this.link.down_rssi, this.link.down_snr));
+        rf.add(this.link);
       }
     }
     if (!quiet) this.render();
@@ -508,7 +512,155 @@ const pingLoop = {
     $('pingStats').innerHTML =
       `<div><b>נשלחו ${this.sent} · התקבלו ${this.got}</b> (${pct}%)${this.running ? ' · פועל' : ' · עצור'}</div>`
       + `<div>⬆ שידור: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
-      + `<div>⬇ קליטה: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`;
+      + `<div>⬇ קליטה: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`
+      + rf.html();
+  },
+};
+
+// ================================================================ distance from signal strength
+// I_M_Here stays put and Where R U? moves with the phone, so every answered continuous ping is a
+// sample "at this spot the signal was X". Log-distance model: rssi = P1m - 10 n log10(d).
+// RSSI swings 5-10 dB on its own, so this gives a band and a trend, not metres.
+const RF_N = 2.7;              // path-loss exponent, open ground with obstacles
+const RF_P1M_DEFAULT = -40;    // dBm at ~1 m, until calibrated
+const RF_SMOOTH = 3;           // average the last pings
+const RF_TREND_WIN = 4;        // trend: mean of the last pings vs the ones before
+const RF_TREND_DB = 4;         // change that counts as closer / farther
+const RF_MAX_PHONE_ACC = 30;   // m, phone GPS samples worse than this are not used for the estimate
+const RF_MIN_SPREAD = 30;      // m the samples must cover before estimating a location
+const RF_SIGMA_DB = 6;         // RSSI noise, sizes the uncertainty circle
+const RF_MIN_D = 15;           // m, the model can't resolve closer than this
+const RF_MIN_SAMPLES = 8;
+const RF_BANDS = [[20, 'פחות מ-20 מ׳'], [50, '20–50 מ׳'], [150, '50–150 מ׳'], [500, '150–500 מ׳'], [Infinity, 'מעל 500 מ׳']];
+
+// signal power of a packet: below 0 dB SNR the packet RSSI is mostly noise
+const rfSignal = (rssi, snr) => (snr < 0 ? rssi + snr : rssi);
+
+// Where is a fixed transmitter, given RSSI samples at known points? Grid search; P1m is solved for
+// each cell (least squares), so calibration doesn't matter here. Returns null until the samples
+// pin it down (the likely area must not touch the search edge).
+function estimateSource(samples, n = RF_N) {
+  if (samples.length < RF_MIN_SAMPLES) return { spread: 0, few: true };
+  const lat0 = samples[0].lat, lon0 = samples[0].lon;
+  const kx = 111320 * Math.cos(rad(lat0)), ky = 110540;
+  const pts = samples.map((s) => ({ x: (s.lon - lon0) * kx, y: (s.lat - lat0) * ky, r: s.rssi }));
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  pts.forEach((p) => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+  const spread = Math.hypot(maxX - minX, maxY - minY);
+  if (spread < RF_MIN_SPREAD) return { spread };
+  const pad = Math.max(200, 2 * spread), N = 70;
+  const x0 = (minX + maxX) / 2 - pad - (maxX - minX) / 2, y0 = (minY + maxY) / 2 - pad - (maxY - minY) / 2;
+  const step = (2 * pad + Math.max(maxX - minX, maxY - minY)) / N;
+  const cost = new Float64Array(N * N);
+  let best = 0;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const cx = x0 + i * step, cy = y0 + j * step;
+      const L = pts.map((p) => -10 * n * Math.log10(Math.max(RF_MIN_D, Math.hypot(p.x - cx, p.y - cy))));
+      const p1m = pts.reduce((a, p, k) => a + p.r - L[k], 0) / pts.length;
+      // a single fluke reading must not pull the answer onto itself: cap each residual at 2 sigma
+      const c = pts.reduce((a, p, k) => a + Math.min((p.r - p1m - L[k]) ** 2, (2 * RF_SIGMA_DB) ** 2), 0);
+      cost[i * N + j] = c;
+      if (c < cost[best]) best = i * N + j;
+    }
+  }
+  // likely area: cells within ~1 sigma (2 parameters) of the best fit
+  const lim = cost[best] + 2.3 * RF_SIGMA_DB ** 2;
+  const bi = Math.floor(best / N), bj = best % N;
+  let radius = 0, open = false;
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      if (cost[i * N + j] > lim) continue;
+      if (i === 0 || j === 0 || i === N - 1 || j === N - 1) open = true;
+      radius = Math.max(radius, Math.hypot(i - bi, j - bj) * step);
+    }
+  }
+  return {
+    spread, open,
+    lat: lat0 + (y0 + bj * step) / ky, lon: lon0 + (x0 + bi * step) / kx,
+    radius: Math.max(10, radius + step / 2),
+  };
+}
+
+const rf = {
+  p1m: (() => { try { return Number(localStorage.getItem('rfP1m')) || RF_P1M_DEFAULT; } catch { return RF_P1M_DEFAULT; } })(),
+  recent: [], raw: [], samples: [], est: null,
+  layer: L.layerGroup().addTo(map),
+  estCircle: L.circle([0, 0], { radius: 10, color: '#f97316', weight: 2, dashArray: '6 6', fillOpacity: 0.08 }),
+  smooth() { return this.recent.length ? this.recent.reduce((a, b) => a + b, 0) / this.recent.length : null; },
+  add(link) {
+    const r = (rfSignal(link.up_rssi, link.up_snr) + rfSignal(link.down_rssi, link.down_snr)) / 2;
+    this.recent.push(r);
+    if (this.recent.length > RF_SMOOTH) this.recent.shift();
+    this.raw.push(r);
+    if (this.raw.length > 2 * RF_TREND_WIN) this.raw.shift();
+    if (S.phone && S.phone.acc <= RF_MAX_PHONE_ACC) {
+      const s = { lat: S.phone.lat, lon: S.phone.lon, rssi: r };
+      this.samples.push(s);
+      if (this.samples.length > 200) this.layer.removeLayer(this.samples.shift().dot);
+      s.dot = L.circleMarker([s.lat, s.lon], { radius: 6, weight: 1, color: '#fff', fillOpacity: 0.9 })
+        .bindTooltip(`${Math.round(r)} dBm`).addTo(this.layer);
+      this.recolor();
+      this.est = estimateSource(this.samples);
+      this.drawEst();
+    }
+  },
+  // dots colored relative to each other: weakest sample red, strongest green
+  recolor() {
+    const r = this.samples.map((s) => s.rssi);
+    const lo = Math.min(...r), span = Math.max(6, Math.max(...r) - lo);
+    this.samples.forEach((s) => s.dot.setStyle({ fillColor: scoreColor(1 + 9 * (s.rssi - lo) / span) }));
+  },
+  drawEst() {
+    const e = this.est;
+    if (e?.lat != null && !e.open) this.estCircle.setLatLng([e.lat, e.lon]).setRadius(e.radius).addTo(map);
+    else this.estCircle.remove();
+  },
+  distBand() {
+    const s = this.smooth();
+    if (s == null) return null;
+    const d = 10 ** ((this.p1m - s) / (10 * RF_N));
+    return RF_BANDS.find(([max]) => d < max)[1];
+  },
+  trend() {
+    const h = this.raw;
+    if (h.length < 2 * RF_TREND_WIN) return null;
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const diff = mean(h.slice(-RF_TREND_WIN)) - mean(h.slice(-2 * RF_TREND_WIN, -RF_TREND_WIN));
+    return diff >= RF_TREND_DB ? ['up', 'מתקרב ⬆'] : diff <= -RF_TREND_DB ? ['down', 'מתרחק ⬇'] : ['', 'בערך באותו מרחק'];
+  },
+  html() {
+    const band = this.distBand();
+    if (!band) return '';
+    const t = this.trend();
+    let out = `<div>📏 מרחק משוער: <b>${band}</b> <span class="muted">(שערוך גס לפי עוצמת אות)</span></div>`;
+    if (t) out += `<div>מגמה: <span class="rf-trend ${t[0]}">${t[1]}</span></div>`;
+    const e = this.est;
+    if (!S.phone) out += '<div class="muted">📍 אין מיקום לטלפון, אין שערוך מיקום על המפה</div>';
+    else if (e?.few) out += `<div class="muted">📍 שערוך מיקום אחרי ${RF_MIN_SAMPLES} דגימות עם מיקום טלפון (יש ${this.samples.length})</div>`;
+    else if (!e || e.lat == null) out += `<div class="muted">📍 לשערוך מיקום: להסתובב באזור (עד עכשיו ${Math.round(e?.spread || 0)} מתוך ${RF_MIN_SPREAD} מ׳)</div>`;
+    else if (e.open) out += '<div class="muted">📍 עוד לא מספיק: ללכת גם בכיוונים אחרים</div>';
+    else {
+      const ph = { lat: S.phone.lat, lon: S.phone.lon };
+      out += `<div>📍 שערוך מיקום: ${fmtDist(distanceM(ph, e))} ${compassName(bearingDeg(ph, e))}, ±${fmtDist(e.radius)}</div>`;
+    }
+    return out;
+  },
+  calibrate() {
+    const s = this.smooth();
+    if (s == null) { log('לכיול: להפעיל פינג רצוף ולעמוד ליד ⁨I_M_Here⁩'); return; }
+    this.p1m = Math.round(s);
+    try { localStorage.setItem('rfP1m', String(this.p1m)); } catch { /* storage unavailable */ }
+    log(`כויל: ${this.p1m} dBm במרחק ~1 מ׳`);
+    pingLoop.render();
+  },
+  clear() {
+    this.samples = [];
+    this.est = null;
+    this.layer.clearLayers();
+    this.estCircle.remove();
+    log('דגימות האות נמחקו מהמפה');
+    pingLoop.render();
   },
 };
 
@@ -767,6 +919,8 @@ function init() {
   });
   $('power').onchange = (e) => send(`power ${e.target.value}`);
   $('btnPingLoop').onclick = () => (pingLoop.running ? pingLoop.stop() : pingLoop.start());
+  $('btnCalib').onclick = () => rf.calibrate();
+  $('btnRfClear').onclick = () => rf.clear();
 
   setConnected(false);
   try {

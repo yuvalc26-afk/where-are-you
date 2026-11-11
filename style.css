@@ -143,6 +143,10 @@ button.loop.on { background: #7c3aed; border-color: #6d28d9; color: #fff; animat
   background: var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
 .ping-stats { font-size: 14px; padding: 8px 10px; border-radius: 10px; background: var(--bg); border: 1px dashed var(--line);
   display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.rf-tools { display: flex; gap: 6px; }
+.rf-tools button { flex: 1; font-size: 13px; padding-block: 6px; }
+.rf-trend.up { color: var(--ok); font-weight: 700; }
+.rf-trend.down { color: var(--bad); font-weight: 700; }
 .actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .combo { display: flex; gap: 6px; }
 .combo button { flex: 1; }
