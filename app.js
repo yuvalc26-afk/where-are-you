@@ -456,10 +456,10 @@ function renderQuality(e) {
 // One ping at a time: the next one goes out as soon as the previous answered or timed out
 // (Where R U? waits the worst-case answer time + ~2.8 s). Counters restart on every start.
 const pingLoop = {
-  running: false, sent: 0, got: 0, closed: 0, up: [], down: [], link: null, timer: null, done: null,
+  running: false, sent: 0, got: 0, failed: 0, up: [], down: [], link: null, timer: null, done: null,
   start() {
     if (!S.link) { log('אין חיבור ל-⁨Where R U?⁩'); return; }
-    Object.assign(this, { running: true, sent: 0, got: 0, closed: 0, up: [], down: [], link: null });
+    Object.assign(this, { running: true, sent: 0, got: 0, failed: 0, up: [], down: [], link: null });
     $('btnPingLoop').classList.add('on');
     $('btnPingLoop').textContent = 'עצור ■';
     $('pingStats').hidden = false;
@@ -470,14 +470,14 @@ const pingLoop = {
     this.render();
     this.loop();
   },
-  stop() {
+  stop(why = '') {
     if (!this.running) return;
     this.running = false;
     clearTimeout(this.timer);
     this.result(false, true);
     $('btnPingLoop').classList.remove('on');
     $('btnPingLoop').textContent = 'פינג רצוף ▶';
-    log(`■ פינג רצוף נעצר: התקבלו ${this.got} מתוך ${this.sent}`);
+    log(`■ פינג רצוף נעצר${why ? ` (${why})` : ''}: התקבלו ${this.got} מתוך ${this.sent}, נכשלו ${this.failed}`);
     this.render();
   },
   async loop() {
@@ -485,7 +485,8 @@ const pingLoop = {
       this.link = null;
       const answered = new Promise((res) => { this.done = res; });
       this.armWait(CMD_TIMEOUT_S * 1000 - BLE_SLACK_S * 1000);
-      if (!(await send('ping'))) { this.stop(); break; }
+      if (!this.running) break;
+      if (!(await send('ping'))) { this.stop('השליחה ל-⁨Where R U?⁩ נכשלה'); break; }
       this.sent++;
       this.render();
       await answered;
@@ -499,7 +500,7 @@ const pingLoop = {
   result(ok, quiet = false) {
     if (!this.done) return;
     clearTimeout(this.timer);
-    if (!quiet) this.closed++;  // stopped mid-wait: that ping never got a verdict
+    if (!ok && !quiet) this.failed++;  // stopped mid-wait is not a failure
     if (ok) {
       this.got++;
       if (this.link) {
@@ -514,12 +515,13 @@ const pingLoop = {
     d(ok);
   },
   render() {
-    // only pings that answered or timed out count; the one in flight has no verdict yet
-    const pct = this.closed ? `${Math.round((100 * this.got) / this.closed)}%` : '–';
+    // only failures lower it; the ping still waiting for its answer isn't counted yet (100% until a failure)
+    const finished = this.sent - (this.done ? 1 : 0);
+    const pct = `${finished ? Math.round((100 * (finished - this.failed)) / finished) : 100}%`;
     const avg = (a) => (a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : '–');
     const l = this.link;
     $('pingStats').innerHTML =
-      `<div><b>נשלחו ${this.sent} · התקבלו ${this.got}</b> (${pct})${this.done ? ' · ממתין לתשובה' : this.running ? ' · פועל' : ' · עצור'}</div>`
+      `<div><b>נשלחו ${this.sent} · התקבלו ${this.got} · נכשלו ${this.failed}</b> (${pct})${this.done ? ' · ממתין לתשובה' : this.running ? ' · פועל' : ' · עצור'}</div>`
       + `<div>קליטה ב-⁨Where R U?⁩: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`
       + `<div>קליטה ב-⁨I_M_Here⁩: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
       + rf.html();
@@ -813,6 +815,7 @@ function bleHint(err) {
 function onLinkState(link, state) {
   if (S.link !== link) return;
   if (state === 'reconnecting') {
+    pingLoop.stop('החיבור נפל');
     chip('chipDongle', 'wait', '⁨Where R U?⁩: החיבור נפל, מתחבר מחדש…');
     log('חיבור ה-BLE נפל — מנסה להתחבר מחדש');
   } else if (state === 'connected') {
@@ -844,7 +847,7 @@ function onClosed(link) {
   $('chipBusy').hidden = true;
   log('החיבור ל-⁨Where R U?⁩ נותק');
   failAllPending('החיבור ל-⁨Where R U?⁩ נותק');
-  pingLoop.stop();
+  pingLoop.stop('החיבור נותק');
 }
 
 async function send(cmd) {
@@ -905,7 +908,9 @@ function init() {
   };
   $('btnUsb').onclick = () => connect(SerialLink);
   $('btnDemo').onclick = () => connect(DemoLink);
-  $('btnDisconnect').onclick = () => S.link?.disconnect();
+  $('btnDisconnect').onclick = () => { pingLoop.stop('נותק ידנית'); S.link?.disconnect(); };
+  // leaving or reloading the page ends the loop (a reload always starts with it off)
+  window.addEventListener('pagehide', () => pingLoop.stop());
   $('btnFit').onclick = fitBoth;
   $('btnMe').onclick = () => {
     S.following = !S.following;
