@@ -542,7 +542,8 @@ const RF_MIN_SPREAD = 30;      // m the samples must cover before estimating a l
 const RF_SIGMA_DB = 6;         // RSSI noise, sizes the uncertainty circle
 const RF_MIN_D = 15;           // m, the model can't resolve closer than this
 const RF_MIN_SAMPLES = 8;
-const RF_BANDS = [[20, 'פחות מ-20 מ׳'], [50, '20–50 מ׳'], [150, '50–150 מ׳'], [500, '150–500 מ׳'], [Infinity, 'מעל 500 מ׳']];
+// ranges wrapped in LRI…PDI so "20–50" doesn't flip to "50–20" inside Hebrew text
+const RF_BANDS = [[20, 'פחות מ-20 מ׳'], [50, '⁦20–50⁩ מ׳'], [150, '⁦50–150⁩ מ׳'], [500, '⁦150–500⁩ מ׳'], [Infinity, 'מעל 500 מ׳']];
 
 // signal power of a packet: below 0 dB SNR the packet RSSI is mostly noise
 const rfSignal = (rssi, snr) => (snr < 0 ? rssi + snr : rssi);
@@ -891,7 +892,7 @@ function startCompass() {
 
 // ================================================================ wiring
 // Stamped by tools/bump_web_version.py on every publish; shown in the log header
-const APP_VERSION = '2026-11-17.2134';
+const APP_VERSION = '2026-11-17.2139';
 
 function init() {
   $('appVer').textContent = `גרסה ${APP_VERSION}`;
