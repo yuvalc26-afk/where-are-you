@@ -1,3 +1,6 @@
+/* the hidden attribute must win over the display rules below (buttons, .ping-stats, .rf-tools …) */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #f4f6fa;
   --card: #ffffff;

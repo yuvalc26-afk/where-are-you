@@ -522,8 +522,8 @@ const pingLoop = {
     const l = this.link;
     $('pingStats').innerHTML =
       `<div><b>נשלחו ${this.sent} · התקבלו ${this.got} · נכשלו ${this.failed}</b> (${pct})${this.done ? ' · ממתין לתשובה' : this.running ? ' · פועל' : ' · עצור'}</div>`
-      + `<div>קליטה ב-⁨Where R U?⁩: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון ${Math.round(l.down_rssi)} dBm` : ''}</div>`
-      + `<div>קליטה ב-⁨I_M_Here⁩: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון ${Math.round(l.up_rssi)} dBm` : ''}</div>`
+      + `<div>קליטה ב-⁨Where R U?⁩: ציון ממוצע ${avg(this.down)}${l ? ` · אחרון <bdi dir="ltr">${Math.round(l.down_rssi)} dBm</bdi>` : ''}</div>`
+      + `<div>קליטה ב-⁨I_M_Here⁩: ציון ממוצע ${avg(this.up)}${l ? ` · אחרון <bdi dir="ltr">${Math.round(l.up_rssi)} dBm</bdi>` : ''}</div>`
       + rf.html();
   },
 };
@@ -891,7 +891,7 @@ function startCompass() {
 
 // ================================================================ wiring
 // Stamped by tools/bump_web_version.py on every publish; shown in the log header
-const APP_VERSION = '2026-11-11.1953';
+const APP_VERSION = '2026-11-17.2134';
 
 function init() {
   $('appVer').textContent = `גרסה ${APP_VERSION}`;
