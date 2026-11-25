@@ -161,6 +161,19 @@ button.loop.on { background: #7c3aed; border-color: #6d28d9; color: #fff; animat
 .combo select { flex: none; width: 96px; padding-inline: 6px; }
 .combo button { min-width: 0; }
 
+/* ---------- flight log ---------- */
+.flight { display: grid; gap: 8px; }
+.flight-info { font-size: 14px; padding: 8px 10px; border-radius: 10px; background: var(--bg); border: 1px dashed var(--line);
+  display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
+.flight-info table { border-collapse: collapse; font-size: 13px; }
+.flight-info td { padding: 1px 8px 1px 0; }
+button.flight-get { background: #0f766e; border-color: #0f766e; color: #fff; }
+button.flight-get.on { background: #dc2626; border-color: #b91c1c; }
+.flight-progress { display: grid; gap: 4px; font-size: 13px; }
+.flight-progress .bar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.flight-progress .bar span { display: block; height: 100%; width: 0; background: #0f766e; transition: width .3s; }
+.flight-progress .txt { font-variant-numeric: tabular-nums; }
+
 /* ---------- details ---------- */
 .details { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
 .details dt { color: var(--muted); }

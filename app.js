@@ -16,8 +16,11 @@ const JOB_TEXT = {
   3: 'מחפש GPS…',
   4: 'מודול ה-GPS לא מגיב',
 };
-const FLAG = { HAS_FIX: 1, GPS_BUSY: 2, BLE_ON: 4, TIME_VALID: 8, BLE_CONNECTED: 16 };
+const FLAG = { HAS_FIX: 1, GPS_BUSY: 2, BLE_ON: 4, TIME_VALID: 8, BLE_CONNECTED: 16, LOGGING: 64 };
 const NEO6M_CEP_M = 2.5;
+// accuracy in metres: the receiver's own estimate (NEO-M9N, NMEA GST) when present, else HDOP x typical error
+const accM = (e) => (e.hacc > 0 ? e.hacc : (e.hdop || 2) * NEO6M_CEP_M);
+const fmtAcc = (m) => (m < 10 ? m.toFixed(m < 1 ? 2 : 1) : String(Math.round(m)));
 const $ = (id) => document.getElementById(id);
 
 // ================================================================ transports
@@ -175,9 +178,29 @@ class DemoLink {
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: 'GPS_FIX', status: 0, param: Number(arg) || 120 }); busy(false); });
       const settle = Number(line.split(' ')[2]) || 0;
       this.later(Math.min(3000 + settle * 100, 9000), () => { log('← GPS result pushed by node (demo)'); this.loc(true, settle + 1); });
-    } else if (cmd === 'ble_on' || cmd === 'ble_off' || cmd === 'buzz') {
-      if (cmd !== 'buzz') this.state.ble = cmd === 'ble_on';
+    } else if (cmd === 'ble_on' || cmd === 'ble_off') {
+      this.state.ble = cmd === 'ble_on';
       this.later(1200, () => { this.link(); this.emit({ ev: 'ack', cmd: cmd.toUpperCase(), status: 0, param: Number(arg) || 0 }); busy(false); });
+    } else if (cmd === 'log_info') {
+      const start = Math.floor(Date.now() / 1000) - 1800;
+      this.later(1500, () => {
+        this.link();
+        this.emit({ ev: 'log_info', rec_size: 14, per_chunk: 16, window_left: 0, cur: { count: 300, start, span: 299 },
+          prev: { count: 184, start: start - 86400, span: 190 }, chunk_ms: 15300, first_chunk_ms: 19400 });
+        busy(false);
+      });
+    } else if (cmd === 'log_get') {
+      const [, w, first, stride, count] = line.split(' ').map(Number);
+      const total = w ? 184 : 300;
+      const bytes = [];
+      let n = 0;
+      for (let i = first; n < count && i < total; i += stride, n++) bytes.push(...this.logRec(i));
+      this.emit({ ev: 'sent', cmd: 'LOG_GET', tx_ms: 1400, wait_ms: 16300 });
+      this.later(900, () => {
+        this.link();
+        this.emit({ ev: 'log_data', which: w, first, stride, n, hex: bytes.map((b) => b.toString(16).padStart(2, '0')).join('') });
+        busy(false);
+      });
     } else if (cmd === 'adaptive') {
       this.state.adaptive = arg === '1';
       this.state.profile = this.state.adaptive ? 2 : 0;
@@ -186,6 +209,18 @@ class DemoLink {
       this.state.dbm = Number(arg);
       this.later(800, () => { this.status(); busy(false); });
     } else busy(false);
+  }
+  // demo flight: climb, then circles of ~80 m around the base
+  logRec(i) {
+    const b = new DataView(new ArrayBuffer(14));
+    const a = i / 25, r = Math.min(80, i * 2);
+    b.setUint16(0, i, true);
+    b.setInt32(2, Math.round((this.base.lat + (r * Math.sin(a)) / 110540) * 1e7), true);
+    b.setInt32(6, Math.round((this.base.lon + (r * Math.cos(a)) / (111320 * Math.cos(this.base.lat * Math.PI / 180))) * 1e7), true);
+    b.setInt16(10, Math.round((18 + Math.min(60, i)) * 10), true);
+    b.setUint8(12, 7 + (i % 5));
+    b.setUint8(13, 21);
+    return Array.from(new Uint8Array(b.buffer));
   }
   disconnect() { this.onClose(); }
 }
@@ -227,7 +262,7 @@ function drawMap() {
   if (S.node) {
     const p = [S.node.lat, S.node.lon];
     nodeMarker.setLatLng(p).addTo(map);
-    nodeCircle.setLatLng(p).setRadius(Math.max(3, S.node.hdop * NEO6M_CEP_M)).addTo(map);
+    nodeCircle.setLatLng(p).setRadius(Math.max(1, accM(S.node))).addTo(map);
   }
   if (S.phone) {
     const p = [S.phone.lat, S.phone.lon];
@@ -293,9 +328,8 @@ function updateNav() {
   const arrow = $('arrow');
   if (!S.node) return;
   const ageS = S.node.age + (Date.now() - S.node.receivedAt) / 1000;
-  const accM = S.node.hdop * NEO6M_CEP_M;
   const avg = S.node.avg > 1 ? ` · עודכן ${S.node.avg} פעמים` : '';
-  $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)} · דיוק ~${accM < 10 ? accM.toFixed(1) : Math.round(accM)} מ׳${avg}`;
+  $('fixAge').textContent = `המיקום נמדד לפני ${fmtDur(ageS)} · דיוק ~${fmtAcc(accM(S.node))} מ׳${avg}`;
   $('btnNavigate').hidden = false;
   $('btnNavigate').href = `https://www.google.com/maps/dir/?api=1&destination=${S.node.lat.toFixed(6)},${S.node.lon.toFixed(6)}`;
   if (!S.phone) {
@@ -333,13 +367,41 @@ function showLocation(e) {
   log(`📍 ${e.lat.toFixed(6)}, ${e.lon.toFixed(6)} · ${e.used} לוויינים · HDOP ${e.hdop}`);
 }
 
+// Position pushed every 20 s during I_M_Here's flight window (short report: no DOP / sky details)
+function showPos(e) {
+  if (!e.has_fix) { log(`📡 עדכון מהטיסה: עדיין אין מיקום (${e.used} לוויינים)`); return; }
+  const first = !S.node;
+  S.node = {
+    ...e, pos: true, fresh: true, job: 0, age: Math.max(0, e.age), fix_unix: Math.floor(Date.now() / 1000) - Math.max(0, e.age),
+    receivedAt: Date.now(),
+  };
+  try { localStorage.setItem('lastNode', JSON.stringify(S.node)); } catch { /* storage unavailable */ }
+  renderNode(first);
+  log(`📡 ${e.lat.toFixed(6)}, ${e.lon.toFixed(6)} · גובה ${e.alt} מ׳ · דיוק ~${fmtAcc(accM(e))} מ׳${e.window_left ? ` · עוד ${fmtDur(e.window_left)} של עדכונים` : ''}`);
+}
+
 function renderNode(fit) {
   const e = S.node;
+  if (e.pos) {
+    setDetails($('fixDetails'), [
+      ['סטטוס', 'עדכון אוטומטי בזמן הטיסה <span class="badge fresh">חי</span>'],
+      ['קואורדינטות', `${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}`],
+      ['דיוק משוער', `~${fmtAcc(accM(e))} מ׳${e.hacc > 0 ? ' (לפי מקלט ה-GPS)' : ''}`],
+      ['גובה', `${e.alt} מ׳`],
+      ['לוויינים בשימוש', e.used],
+      ['זמן המדידה', fmtTime(e.fix_unix)],
+      ['עדכונים אוטומטיים', e.window_left ? `עוד ${fmtDur(e.window_left)}` : 'הסתיימו'],
+    ]);
+    drawMap();
+    updateNav();
+    if (fit) fitBoth();
+    return;
+  }
   const fixType = { 2: '2D', 3: '3D' }[e.fix_type] ?? '?';
   setDetails($('fixDetails'), [
-    ['סטטוס', `${esc(JOB_TEXT[e.job] ?? e.job)} <span class="badge ${e.fresh ? 'fresh' : ''}">${e.fresh ? 'חדש' : 'שמור'}</span>`],
-    ['קואורדינטות', `${e.lat.toFixed(6)}, ${e.lon.toFixed(6)}`],
-    ['דיוק משוער', `~${(e.hdop * NEO6M_CEP_M).toFixed(1)} מ׳`],
+    ['סטטוס', `${esc(JOB_TEXT[e.job] ?? e.job)} <span class="badge ${e.fresh ? 'fresh' : ''}">${e.boot ? 'מיקום ראשון אחרי הדלקה' : e.fresh ? 'חדש' : 'שמור'}</span>`],
+    ['קואורדינטות', `${e.lat.toFixed(e.hacc > 0 ? 7 : 6)}, ${e.lon.toFixed(e.hacc > 0 ? 7 : 6)}`],
+    ['דיוק משוער', `~${fmtAcc(accM(e))} מ׳${e.hacc > 0 ? ' (לפי מקלט ה-GPS)' : ''}`],
     ['עדכונים בחיפוש', e.avg ? `${e.avg} (נשלח האחרון)` : '—'],
     ['גובה', `${e.alt} מ׳`],
     ['זמן המדידה', fmtTime(e.fix_unix)],
@@ -370,7 +432,7 @@ function renderLink() {
     const f = lastFlags;
     rows.push(['מצב היחידה', [
       f & FLAG.BLE_ON ? `BLE דולק${f & FLAG.BLE_CONNECTED ? ' (טלפון מחובר)' : ''}` : 'BLE כבוי',
-      f & FLAG.GPS_BUSY ? 'מחפש GPS' : 'GPS במנוחה',
+      f & FLAG.LOGGING ? 'מקליט לוג טיסה (5 הדקות הראשונות)' : f & FLAG.GPS_BUSY ? 'מחפש GPS' : 'GPS במנוחה',
       f & FLAG.HAS_FIX ? 'יש מיקום' : 'אין מיקום',
     ].join(' · ')]);
   }
@@ -379,7 +441,7 @@ function renderLink() {
 
 // ================================================================ command buttons
 // Blue idle -> yellow while waiting for ImHere -> green (answered) / red (no answer) for 10 s -> blue
-const CMD_OF = { PING: 'ping', GET_LAST: 'get_last', GPS_FIX: 'gps_fix', BLE_ON: 'ble_on', BLE_OFF: 'ble_off', BUZZ: 'buzz' };
+const CMD_OF = { PING: 'ping', GET_LAST: 'get_last', GPS_FIX: 'gps_fix', BLE_ON: 'ble_on', BLE_OFF: 'ble_off', LOG_INFO: 'log_info' };
 // Until Where R U? transmits (it may still be busy with a previous command); after that its own
 // "sent" event gives the exact wait: worst-case answer time + ~2.8 s, then it reports failed.
 const CMD_TIMEOUT_S = 30;
@@ -676,43 +738,183 @@ const rf = {
   },
 };
 
-// Buzzer countdown: starts at the ACK (ImHere starts buzzing right after sending it)
-const buzz = { endAt: 0, tick: null };
-const fmtClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+// ================================================================ flight log
+// I_M_Here stores one position per second during the first 5 minutes after power-on (14 bytes each).
+// Download: one LOG_GET per chunk of up to 16 positions (~13 s on air at SF12); Where R U? uses a short
+// preamble while the transfer runs, so each chunk is ~15 s. Fewer points (every N s) = proportionally faster.
+const FLIGHT_STRIDES = [1, 2, 5, 10, 30];
+const flight = {
+  info: null, running: false, which: 0, stride: 1, recs: [], next: 0, total: 0, startUnix: 0, fails: 0,
+  waiter: null, timer: null, t0: 0, got: 0,
+  layer: L.layerGroup().addTo(map),
 
-function buzzLabel(text) {
-  const b = document.querySelector('[data-cmd="buzz"]');
-  if (!b) return;
-  b.dataset.label ??= b.textContent;
-  b.textContent = text ?? b.dataset.label;
-}
+  chunks(count, stride) { return Math.ceil(Math.ceil(count / stride) / (this.info?.per_chunk || 16)); },
+  estimateS(count, stride) {
+    const c = this.chunks(count, stride);
+    if (!c || !this.info) return 0;
+    return (this.info.first_chunk_ms + (c - 1) * this.info.chunk_ms) / 1000;
+  },
+  onInfo(e) {
+    this.info = e;
+    const row = (name, l) => {
+      if (!l.count) return `<div><b>${name}:</b> ריק</div>`;
+      const est = FLIGHT_STRIDES.map((s) => `<td>${s === 1 ? 'כל שנייה' : `כל ${s} ש׳`}</td><td>${Math.ceil(l.count / s)} נק׳</td><td>~${fmtDur(this.estimateS(l.count, s))}</td>`);
+      return `<div><b>${name}:</b> ${l.count} נקודות · ${fmtDur(l.span)} · ${(l.count * e.rec_size / 1024).toFixed(1)} KB`
+        + `${l.start ? ` · התחיל ${fmtTime(l.start)}` : ''}</div>`
+        + `<table>${est.map((r) => `<tr>${r}</tr>`).join('')}</table>`;
+    };
+    $('flightInfo').innerHTML = (e.window_left ? `<div>⏺ עדיין מקליט, עוד ${fmtDur(e.window_left)} (הורדה עכשיו תביא את מה שנרשם עד עכשיו)</div>` : '')
+      + row('ההדלקה הנוכחית', e.cur) + row('ההדלקה הקודמת', e.prev);
+    $('flightInfo').hidden = false;
+    log(`לוג טיסה: נוכחי ${e.cur.count} נקודות, קודם ${e.prev.count}`);
+  },
 
-function buzzCountdown(seconds) {
-  const st = cmdState.buzz || (cmdState.buzz = {});
-  clearTimeout(st.timer);
-  clearTimeout(st.reset);
-  st.pending = false;
-  clearInterval(buzz.tick);
-  buzz.endAt = Date.now() + seconds * 1000;
-  setBtnState('buzz', 'running');
-  const update = () => {
-    const left = Math.ceil((buzz.endAt - Date.now()) / 1000);
-    if (left > 0) { buzzLabel(`מצפצף… ${fmtClock(left)}`); return; }
-    buzzStop();
-    log('🔔 הצפצוף הסתיים');
-    try { navigator.vibrate?.([200, 100, 200]); } catch { /* not supported */ }
-    cmdDone('buzz', true);
-  };
-  update();
-  buzz.tick = setInterval(update, 500);
-  log(`🔊 ⁨I_M_Here⁩ מצפצף ${seconds >= 60 ? fmtDur(seconds) : `${seconds} ש׳`}`);
-}
-
-function buzzStop() {
-  clearInterval(buzz.tick);
-  buzz.tick = null;
-  buzzLabel(null);
-}
+  async start() {
+    if (!S.link) { log('אין חיבור ל-⁨Where R U?⁩'); return; }
+    if (!this.info) { log('קודם ללחוץ "בדוק גודל וזמן הורדה"'); return; }
+    if (cmdState.log_info?.pending) { log('⏳ ממתין לתשובה על הגודל'); return; }
+    const which = Number($('flightWhich').value), stride = Number($('flightStride').value);
+    const count = (which ? this.info.prev : this.info.cur).count;
+    if (!count) { log('הלוג הזה ריק'); return; }
+    const resume = this.which === which && this.stride === stride && this.recs.length && this.next < this.total;
+    if (!resume) {
+      Object.assign(this, { which, stride, recs: [], next: 0, total: Math.ceil(count / stride) });
+      this.startUnix = (which ? this.info.prev : this.info.cur).start;
+    }
+    pingLoop.stop('הורדת לוג');
+    this.running = true;
+    this.fails = 0;
+    this.t0 = Date.now();
+    this.got = 0;
+    $('btnFlightGet').classList.add('on');
+    $('btnFlightGet').textContent = 'עצור הורדה ■';
+    $('flightProgress').hidden = false;
+    log(`⬇ ${resume ? 'ממשיך' : 'מוריד'} לוג (${which ? 'קודם' : 'נוכחי'}), ${this.total} נקודות, ~${fmtDur(this.estimateS(count - this.next * stride, stride))}`);
+    this.progress();
+    while (this.running && this.next < this.total) {
+      const n = Math.min(this.info.per_chunk, this.total - this.next);
+      const e = await this.request(`log_get ${which} ${this.next * stride} ${stride} ${n}`);
+      if (!this.running) break;
+      if (!e) {
+        if (++this.fails >= 3) { this.stop('3 ניסיונות כושלים ברצף'); return; }
+        log(`חבילה לא הגיעה, מנסה שוב (${this.fails}/3)`);
+        continue;
+      }
+      this.fails = 0;
+      if (!e.n) { this.total = this.next; break; }  // the log is shorter than announced
+      this.recs.push(...this.decode(e.hex));
+      this.next += e.n;
+      this.got += e.n;
+      this.progress();
+      this.draw(false);
+    }
+    if (this.running) this.finish();
+  },
+  request(line) {
+    return new Promise((resolve) => {
+      this.waiter = resolve;
+      this.armWait(60000);  // until Where R U? says it transmitted (it may still be busy)
+      send(line).then((ok) => { if (!ok) this.settle(null); });
+    });
+  },
+  armWait(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.settle(null), ms + BLE_SLACK_S * 1000); },
+  settle(e) { clearTimeout(this.timer); const w = this.waiter; this.waiter = null; w?.(e); },
+  stop(why = '') {
+    if (!this.running) return;
+    this.running = false;
+    this.settle(null);
+    $('btnFlightGet').classList.remove('on');
+    $('btnFlightGet').textContent = this.next < this.total ? 'המשך הורדה ⬇' : 'הורד לוג ⬇';
+    log(`■ הורדת הלוג נעצרה${why ? ` (${why})` : ''}: ${this.recs.length} מתוך ${this.total} נקודות. אפשר להמשיך מאותה נקודה.`);
+    this.progress();
+    if (this.recs.length) this.done();
+  },
+  finish() {
+    this.running = false;
+    $('btnFlightGet').classList.remove('on');
+    $('btnFlightGet').textContent = 'הורד לוג ⬇';
+    log(`✓ הלוג הורד: ${this.recs.length} נקודות ב-${fmtDur((Date.now() - this.t0) / 1000)}`);
+    this.progress();
+    this.done();
+  },
+  done() {
+    this.draw(true);
+    $('flightTools').hidden = false;
+    try { localStorage.setItem('flightTrack', JSON.stringify({ startUnix: this.startUnix, recs: this.recs })); } catch { /* storage */ }
+  },
+  progress() {
+    const pct = this.total ? Math.round((100 * this.recs.length) / this.total) : 0;
+    $('flightProgress').querySelector('.bar span').style.width = `${pct}%`;
+    let left = '';
+    if (this.running && this.got) {
+      const perRec = (Date.now() - this.t0) / this.got;
+      left = ` · נותרו ~${fmtDur(((this.total - this.next) * perRec) / 1000)}`;
+    } else if (this.running && this.info) {
+      left = ` · נותרו ~${fmtDur(this.estimateS((this.total - this.next) * this.stride, this.stride))}`;
+    }
+    $('flightProgress').querySelector('.txt').textContent = `${this.recs.length} / ${this.total} נקודות (${pct}%)${left}`;
+  },
+  decode(hex) {
+    const out = [];
+    const b = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < b.length; i++) b[i] = parseInt(hex.substr(2 * i, 2), 16);
+    const v = new DataView(b.buffer);
+    for (let o = 0; o + 14 <= b.length; o += 14) {
+      out.push({
+        t: v.getUint16(o, true), lat: v.getInt32(o + 2, true) / 1e7, lon: v.getInt32(o + 6, true) / 1e7,
+        alt: v.getInt16(o + 10, true) / 10, acc: v.getUint8(o + 12) / 10, sats: v.getUint8(o + 13),
+      });
+    }
+    return out;
+  },
+  draw(fit) {
+    this.layer.clearLayers();
+    const pts = this.recs.map((r) => [r.lat, r.lon]);
+    if (!pts.length) return;
+    L.polyline(pts, { color: '#7c3aed', weight: 3, opacity: 0.85 }).addTo(this.layer);
+    const tip = (r, what) => `${what} · ${fmtTime(this.startUnix ? this.startUnix + r.t : 0)} · גובה ${r.alt} מ׳`;
+    L.circleMarker(pts[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#16a34a', fillOpacity: 1 })
+      .bindTooltip(tip(this.recs[0], 'התחלה')).addTo(this.layer);
+    L.circleMarker(pts[pts.length - 1], { radius: 7, color: '#fff', weight: 2, fillColor: '#7c3aed', fillOpacity: 1 })
+      .bindTooltip(tip(this.recs[this.recs.length - 1], 'נקודה אחרונה')).addTo(this.layer);
+    if (fit) map.fitBounds(pts, { padding: [40, 40], maxZoom: 18 });
+  },
+  iso(r) { return this.startUnix ? new Date((this.startUnix + r.t) * 1000).toISOString() : ''; },
+  save(name, text, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  },
+  fileName(ext) {
+    const d = this.startUnix ? new Date(this.startUnix * 1000).toISOString().slice(0, 16).replace(/[-:T]/g, '') : 'flight';
+    return `IMHere_${d}.${ext}`;
+  },
+  gpx() {
+    const pts = this.recs.map((r) => `<trkpt lat="${r.lat.toFixed(7)}" lon="${r.lon.toFixed(7)}"><ele>${r.alt}</ele>`
+      + `${this.startUnix ? `<time>${this.iso(r)}</time>` : ''}<sat>${r.sats}</sat><hdop>${r.acc}</hdop></trkpt>`).join('\n');
+    this.save(this.fileName('gpx'), `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Where R U?" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>I_M_Here flight</name><trkseg>\n${pts}\n</trkseg></trk>\n</gpx>\n`, 'application/gpx+xml');
+  },
+  csv() {
+    const rows = this.recs.map((r) => [r.t, this.iso(r), r.lat.toFixed(7), r.lon.toFixed(7), r.alt, r.acc, r.sats].join(','));
+    this.save(this.fileName('csv'), `t_s,utc,lat,lon,alt_m,acc_m,sats\n${rows.join('\n')}\n`, 'text/csv');
+  },
+  restore() {
+    try {
+      const s = JSON.parse(localStorage.getItem('flightTrack') || 'null');
+      if (!s?.recs?.length) return;
+      Object.assign(this, { startUnix: s.startUnix, recs: s.recs, next: s.recs.length, total: s.recs.length });
+      this.draw(false);
+      $('flightTools').hidden = false;
+    } catch { /* storage unavailable */ }
+  },
+  hide() {
+    this.layer.clearLayers();
+    $('flightTools').hidden = true;
+    try { localStorage.removeItem('flightTrack'); } catch { /* storage */ }
+  },
+};
 
 function failAllPending(why) {
   Object.keys(cmdState).forEach((c) => { if (cmdState[c].pending) cmdDone(c, false, why); });
@@ -736,27 +938,25 @@ function onEvent(e) {
       break;
     case 'flags': lastFlags = e.v; renderLink(); break;
     case 'sent':
-      if (e.cmd === 'PING' && pingLoop.running) pingLoop.armWait(e.wait_ms);
+      if (e.cmd === 'LOG_GET') { if (flight.waiter) flight.armWait(e.wait_ms); }
+      else if (e.cmd === 'PING' && pingLoop.running) pingLoop.armWait(e.wait_ms);
       else if (CMD_OF[e.cmd]) cmdExtend(CMD_OF[e.cmd], e.wait_ms / 1000 + BLE_SLACK_S);
       break;
     case 'failed':
       chip('chipNode', 'bad', `⁨I_M_Here⁩: לא עונה (${e.cmd})`);
       clearQuality();
-      if (e.cmd === 'PING' && pingLoop.running) pingLoop.result(false);
+      if (e.cmd === 'LOG_GET') flight.settle(null);
+      else if (e.cmd === 'PING' && pingLoop.running) pingLoop.result(false);
       else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], false, '⁨I_M_Here⁩ לא ענה');
       break;
     case 'ack': {
       const win = Number($('gpsWindow').value);
       const extra = e.cmd === 'GPS_FIX' ? ` · מחפש עד ${e.param} ש׳${win ? `, אחרי המיקום הראשון מעדכן עוד ${win} ש׳` : ''}, התוצאה תגיע לבד`
-        : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי')
-        : e.cmd === 'BUZZ' ? (e.status === 0 ? (e.param ? ` · מצפצף ${e.param} ש׳` : ' · הצפצוף הופסק') : ' · אין זמזם מוגדר ב-⁨I_M_Here⁩') : '';
+        : e.cmd === 'BLE_ON' ? (e.param ? ` · BLE דולק ל-${e.param} דק׳` : ' · BLE דולק עד כיבוי') : '';
       log(`✓ ${e.cmd} ${e.status === 0 ? 'אושר' : 'נדחה'}${extra}`);
       // GPS check stays yellow until the search result is pushed
       if (e.cmd === 'GPS_FIX') { if (e.status === 0) cmdExtend('gps_fix', e.param + Number($('gpsWindow').value) + 60); else cmdDone('gps_fix', false, 'נדחה'); }
-      else if (e.cmd === 'BUZZ' && e.status === 0) {
-        if (e.param > 0) buzzCountdown(e.param);
-        else { buzzStop(); cmdDone('buzz', true); }
-      } else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], e.status === 0, 'נדחה');
+      else if (CMD_OF[e.cmd]) cmdDone(CMD_OF[e.cmd], e.status === 0, 'נדחה');
       break;
     }
     case 'pong':
@@ -766,9 +966,22 @@ function onEvent(e) {
       else cmdDone('ping', true);
       break;
     case 'loc':
+      if (e.boot) log('📡 ⁨I_M_Here⁩ מצא מיקום ראשון אחרי ההדלקה ושלח אותו');
       showLocation(e);
+      if (e.boot) break;  // pushed on its own, not an answer to a button
       if (e.fresh) cmdDone('gps_fix', e.has_fix, 'החיפוש הסתיים בלי מיקום');
       else cmdDone('get_last', true);
+      break;
+    case 'pos':
+      lastFlags = e.flags; renderLink();
+      showPos(e);
+      break;
+    case 'log_info':
+      flight.onInfo(e);
+      cmdDone('log_info', true);
+      break;
+    case 'log_data':
+      flight.settle(e);
       break;
   }
 }
@@ -817,6 +1030,7 @@ function onLinkState(link, state) {
   if (S.link !== link) return;
   if (state === 'reconnecting') {
     pingLoop.stop('החיבור נפל');
+    flight.stop('החיבור נפל');
     chip('chipDongle', 'wait', '⁨Where R U?⁩: החיבור נפל, מתחבר מחדש…');
     log('חיבור ה-BLE נפל — מנסה להתחבר מחדש');
   } else if (state === 'connected') {
@@ -849,6 +1063,7 @@ function onClosed(link) {
   log('החיבור ל-⁨Where R U?⁩ נותק');
   failAllPending('החיבור ל-⁨Where R U?⁩ נותק');
   pingLoop.stop('החיבור נותק');
+  flight.stop('החיבור נותק');
 }
 
 async function send(cmd) {
@@ -892,7 +1107,7 @@ function startCompass() {
 
 // ================================================================ wiring
 // Stamped by tools/bump_web_version.py on every publish; shown in the log header
-const APP_VERSION = '2026-11-17.2139';
+const APP_VERSION = '2026-11-25.1529';
 
 function init() {
   $('appVer').textContent = `גרסה ${APP_VERSION}`;
@@ -913,9 +1128,9 @@ function init() {
   };
   $('btnUsb').onclick = () => connect(SerialLink);
   $('btnDemo').onclick = () => connect(DemoLink);
-  $('btnDisconnect').onclick = () => { pingLoop.stop('נותק ידנית'); S.link?.disconnect(); };
+  $('btnDisconnect').onclick = () => { pingLoop.stop('נותק ידנית'); flight.stop('נותק ידנית'); S.link?.disconnect(); };
   // leaving or reloading the page ends the loop (a reload always starts with it off)
-  window.addEventListener('pagehide', () => pingLoop.stop());
+  window.addEventListener('pagehide', () => { pingLoop.stop(); flight.stop(); });
   $('btnFit').onclick = fitBoth;
   $('btnMe').onclick = () => {
     S.following = !S.following;
@@ -929,17 +1144,24 @@ function init() {
       // yellow = still waiting for the answer: don't send the same command again
       if (cmdState[c]?.pending) { log('⏳ עדיין ממתין לתשובה, לא נשלח שוב'); return; }
       if (c === 'ping' && pingLoop.running) { log('פינג רצוף פועל, הפינג הבודד לא נשלח'); return; }
-      if (c === 'buzz') buzzStop();  // a new press replaces a running countdown
+      if (flight.running) { log('הורדת לוג פועלת: לעצור אותה קודם'); return; }
       const settle = Number($('gpsWindow').value);
       cmdStart(c, c === 'gps_fix' ? Number($('gpsTimeout').value) + settle + 60 : CMD_TIMEOUT_S);
       const line = c === 'gps_fix' ? `gps_fix ${$('gpsTimeout').value} ${settle}`
-        : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}`
-        : c === 'buzz' ? `buzz ${$('buzzSeconds').value}` : c;
+        : c === 'ble_on' ? `ble_on ${$('bleMinutes').value}` : c;
       if (!(await send(line))) cmdDone(c, false, 'לא נשלח ל-⁨Where R U?⁩');
     };
   });
   $('power').onchange = (e) => send(`power ${e.target.value}`);
-  $('btnPingLoop').onclick = () => (pingLoop.running ? pingLoop.stop() : pingLoop.start());
+  $('btnPingLoop').onclick = () => {
+    if (flight.running) { log('הורדת לוג פועלת: לעצור אותה קודם'); return; }
+    if (pingLoop.running) pingLoop.stop(); else pingLoop.start();
+  };
+  $('btnFlightGet').onclick = () => (flight.running ? flight.stop('נעצר ידנית') : flight.start());
+  $('btnGpx').onclick = () => flight.gpx();
+  $('btnCsv').onclick = () => flight.csv();
+  $('btnTrackClear').onclick = () => flight.hide();
+  flight.restore();
   $('btnCalib').onclick = () => rf.calibrate();
   $('btnRfClear').onclick = () => rf.clear();
 
