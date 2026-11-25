@@ -174,6 +174,22 @@ button.flight-get.on { background: #dc2626; border-color: #b91c1c; }
 .flight-progress .bar span { display: block; height: 100%; width: 0; background: #0f766e; transition: width .3s; }
 .flight-progress .txt { font-variant-numeric: tabular-nums; }
 
+/* ---------- positions received in flight ---------- */
+.flash-new { color: #16a34a !important; transition: color .2s; font-weight: 700; }
+.pts-wrap { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
+table.pts { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.pts th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-weight: 600; text-align: start; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+table.pts td { padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.pts tbody tr { cursor: pointer; }
+table.pts tbody tr:hover { background: var(--bg); }
+table.pts tbody tr:first-child { background: rgba(22, 163, 74, .08); }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+.pt-badge { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 999px;
+  background: #0f766e; color: #fff; font-weight: 700; font-size: 12px; }
+.pt-num { display: grid; place-items: center; }
+.pt-num span { display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 3px; border-radius: 999px;
+  background: #0f766e; color: #fff; font: 700 12px system-ui, sans-serif; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
 /* ---------- details ---------- */
 .details { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 14px; }
 .details dt { color: var(--muted); }

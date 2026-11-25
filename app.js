@@ -377,15 +377,86 @@ function showPos(e) {
   };
   try { localStorage.setItem('lastNode', JSON.stringify(S.node)); } catch { /* storage unavailable */ }
   renderNode(first);
-  log(`📡 ${e.lat.toFixed(6)}, ${e.lon.toFixed(6)} · גובה ${e.alt} מ׳ · דיוק ~${fmtAcc(accM(e))} מ׳${e.window_left ? ` · עוד ${fmtDur(e.window_left)} של עדכונים` : ''}`);
+  const n = flightPts.add(e);
+  flashFresh();
+  log(`📡 #${n} ${e.lat.toFixed(6)}, ${e.lon.toFixed(6)} · גובה ${e.alt} מ׳ · דיוק ~${fmtAcc(accM(e))} מ׳${e.window_left ? ` · עוד ${fmtDur(e.window_left)} של עדכונים` : ''}`);
 }
+
+// New position from the flight: coordinates and distance green for 2 s, then back to normal
+let flashTimer = null;
+function flashFresh() {
+  const els = [$('coordVal'), $('distance')].filter(Boolean);
+  els.forEach((el) => { el.classList.remove('flash-new'); void el.offsetWidth; el.classList.add('flash-new'); });
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => els.forEach((el) => el.classList.remove('flash-new')), 2000);
+}
+
+// Every position received during the flight window: numbered dots on the map + a list
+const flightPts = {
+  pts: [],
+  layer: L.layerGroup().addTo(map),
+  add(e) {
+    const p = {
+      n: this.pts.length + 1, lat: e.lat, lon: e.lon, alt: e.alt, acc: accM(e), used: e.used,
+      at: Date.now(), boot: !!e.boot,
+    };
+    this.pts.push(p);
+    this.dot(p);
+    this.render();
+    this.save();
+    return p.n;
+  },
+  dot(p) {
+    const icon = L.divIcon({ className: 'pt-num', html: `<span>${p.n}</span>`, iconSize: [26, 26] });
+    p.marker = L.marker([p.lat, p.lon], { icon, zIndexOffset: p.n })
+      .bindTooltip(`#${p.n} · ${new Date(p.at).toLocaleTimeString('he-IL', { hour12: false })} · גובה ${p.alt} מ׳`)
+      .addTo(this.layer);
+  },
+  render() {
+    $('ptsCard').hidden = !this.pts.length;
+    $('ptsCount').textContent = this.pts.length ? `(${this.pts.length})` : '';
+    $('ptsBody').innerHTML = this.pts.slice().reverse().map((p) => `<tr data-n="${p.n}">`
+      + `<td><span class="pt-badge">${p.n}</span></td>`
+      + `<td>${new Date(p.at).toLocaleTimeString('he-IL', { hour12: false })}${p.boot ? ' ⭐' : ''}</td>`
+      + `<td class="ltr">${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}</td>`
+      + `<td>${p.alt} מ׳</td><td>±${fmtAcc(p.acc)} מ׳</td><td>${p.used}</td></tr>`).join('');
+  },
+  focus(n) {
+    const p = this.pts.find((q) => q.n === n);
+    if (!p) return;
+    map.setView([p.lat, p.lon], Math.max(map.getZoom(), 17));
+    p.marker.openTooltip();
+  },
+  save() {
+    try { localStorage.setItem('flightPts', JSON.stringify(this.pts.map(({ marker, ...p }) => p))); } catch { /* storage */ }
+  },
+  restore() {
+    try {
+      this.pts = JSON.parse(localStorage.getItem('flightPts') || '[]');
+      this.pts.forEach((p) => this.dot(p));
+      this.render();
+    } catch { this.pts = []; }
+  },
+  clear() {
+    this.pts = [];
+    this.layer.clearLayers();
+    this.render();
+    this.save();
+    log('רשימת המיקומים מהטיסה נמחקה');
+  },
+  csv() {
+    const rows = this.pts.map((p) => [p.n, new Date(p.at).toISOString(), p.lat.toFixed(7), p.lon.toFixed(7), p.alt, p.acc.toFixed(2), p.used].join(','));
+    flight.save(`IMHere_points_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.csv`,
+      `n,received_utc,lat,lon,alt_m,acc_m,sats\n${rows.join('\n')}\n`, 'text/csv');
+  },
+};
 
 function renderNode(fit) {
   const e = S.node;
   if (e.pos) {
     setDetails($('fixDetails'), [
       ['סטטוס', 'עדכון אוטומטי בזמן הטיסה <span class="badge fresh">חי</span>'],
-      ['קואורדינטות', `${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}`],
+      ['קואורדינטות', `<span id="coordVal">${e.lat.toFixed(7)}, ${e.lon.toFixed(7)}</span>`],
       ['דיוק משוער', `~${fmtAcc(accM(e))} מ׳${e.hacc > 0 ? ' (לפי מקלט ה-GPS)' : ''}`],
       ['גובה', `${e.alt} מ׳`],
       ['לוויינים בשימוש', e.used],
@@ -400,7 +471,7 @@ function renderNode(fit) {
   const fixType = { 2: '2D', 3: '3D' }[e.fix_type] ?? '?';
   setDetails($('fixDetails'), [
     ['סטטוס', `${esc(JOB_TEXT[e.job] ?? e.job)} <span class="badge ${e.fresh ? 'fresh' : ''}">${e.boot ? 'מיקום ראשון אחרי הדלקה' : e.fresh ? 'חדש' : 'שמור'}</span>`],
-    ['קואורדינטות', `${e.lat.toFixed(e.hacc > 0 ? 7 : 6)}, ${e.lon.toFixed(e.hacc > 0 ? 7 : 6)}`],
+    ['קואורדינטות', `<span id="coordVal">${e.lat.toFixed(e.hacc > 0 ? 7 : 6)}, ${e.lon.toFixed(e.hacc > 0 ? 7 : 6)}</span>`],
     ['דיוק משוער', `~${fmtAcc(accM(e))} מ׳${e.hacc > 0 ? ' (לפי מקלט ה-GPS)' : ''}`],
     ['עדכונים בחיפוש', e.avg ? `${e.avg} (נשלח האחרון)` : '—'],
     ['גובה', `${e.alt} מ׳`],
@@ -968,7 +1039,10 @@ function onEvent(e) {
     case 'loc':
       if (e.boot) log('📡 ⁨I_M_Here⁩ מצא מיקום ראשון אחרי ההדלקה ושלח אותו');
       showLocation(e);
-      if (e.boot) break;  // pushed on its own, not an answer to a button
+      if (e.boot) {  // pushed on its own, not an answer to a button
+        if (e.has_fix) { flightPts.add(e); flashFresh(); }
+        break;
+      }
       if (e.fresh) cmdDone('gps_fix', e.has_fix, 'החיפוש הסתיים בלי מיקום');
       else cmdDone('get_last', true);
       break;
@@ -1107,7 +1181,7 @@ function startCompass() {
 
 // ================================================================ wiring
 // Stamped by tools/bump_web_version.py on every publish; shown in the log header
-const APP_VERSION = '2026-11-25.1529';
+const APP_VERSION = '2026-11-25.2001';
 
 function init() {
   $('appVer').textContent = `גרסה ${APP_VERSION}`;
@@ -1162,6 +1236,10 @@ function init() {
   $('btnCsv').onclick = () => flight.csv();
   $('btnTrackClear').onclick = () => flight.hide();
   flight.restore();
+  flightPts.restore();
+  $('btnPtsClear').onclick = () => flightPts.clear();
+  $('btnPtsCsv').onclick = () => flightPts.csv();
+  $('ptsBody').onclick = (ev) => { const tr = ev.target.closest('tr'); if (tr) flightPts.focus(Number(tr.dataset.n)); };
   $('btnCalib').onclick = () => rf.calibrate();
   $('btnRfClear').onclick = () => rf.clear();
 

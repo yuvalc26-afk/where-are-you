@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a">
   <title>Where R U?</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=2026-11-25.1529">
+  <link rel="stylesheet" href="style.css?v=2026-11-25.2001">
 </head>
 <body>
   <header class="topbar">
@@ -102,6 +102,20 @@
         </div>
       </div>
 
+      <div id="ptsCard" class="card" hidden>
+        <h2>מיקומים שהתקבלו בטיסה <span id="ptsCount" class="muted"></span></h2>
+        <div class="pts-wrap">
+          <table class="pts">
+            <thead><tr><th>#</th><th>שעה</th><th>קואורדינטות</th><th>גובה</th><th>דיוק</th><th>לווי׳</th></tr></thead>
+            <tbody id="ptsBody"></tbody>
+          </table>
+        </div>
+        <div class="rf-tools">
+          <button id="btnPtsCsv" type="button">שמור CSV</button>
+          <button id="btnPtsClear" type="button">נקה רשימה ונקודות</button>
+        </div>
+      </div>
+
       <div class="card">
         <h2>לוג טיסה <span class="muted">(5 הדקות הראשונות אחרי הדלקה, מיקום כל שנייה)</span></h2>
         <div class="flight">
@@ -160,6 +174,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="app.js?v=2026-11-25.1529"></script>
+  <script src="app.js?v=2026-11-25.2001"></script>
 </body>
 </html>
