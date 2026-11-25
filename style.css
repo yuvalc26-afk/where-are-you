@@ -174,6 +174,18 @@ button.flight-get.on { background: #dc2626; border-color: #b91c1c; }
 .flight-progress .bar span { display: block; height: 100%; width: 0; background: #0f766e; transition: width .3s; }
 .flight-progress .txt { font-variant-numeric: tabular-nums; }
 
+/* ---------- flight window timer ---------- */
+.win-timer { border-radius: 14px; padding: 12px 14px; background: #0f766e; color: #fff; display: grid; gap: 6px; }
+.win-timer.over { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+.wt-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wt-title { font-weight: 600; font-size: 14px; }
+.wt-left { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; direction: ltr; }
+.win-timer .bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,.3); overflow: hidden; }
+.win-timer.over .bar { background: var(--line); }
+.win-timer .bar span { display: block; height: 100%; width: 0; background: #fff; transition: width 1s linear; }
+.win-timer.over .bar span { background: var(--muted); }
+.wt-sub { font-size: 13px; opacity: .9; font-variant-numeric: tabular-nums; }
+
 /* ---------- positions received in flight ---------- */
 .flash-new { color: #16a34a !important; transition: color .2s; font-weight: 700; }
 .pts-wrap { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }

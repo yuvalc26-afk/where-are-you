@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a">
   <title>Where R U?</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css?v=2026-11-25.2001">
+  <link rel="stylesheet" href="style.css?v=2026-11-25.2055">
 </head>
 <body>
   <header class="topbar">
@@ -36,6 +36,11 @@
     </section>
 
     <section class="panel">
+      <div id="winTimer" class="win-timer" hidden>
+        <div class="wt-row"><span class="wt-title">⏱ 5 הדקות הראשונות של <bdi>I_M_Here</bdi></span><span id="wtLeft" class="wt-left"></span></div>
+        <div class="bar"><span id="wtBar"></span></div>
+        <div id="wtSub" class="wt-sub"></div>
+      </div>
       <div class="card nav">
         <div class="arrow-box">
           <svg id="arrow" viewBox="0 0 100 100" aria-hidden="true">
@@ -174,6 +179,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="app.js?v=2026-11-25.2001"></script>
+  <script src="app.js?v=2026-11-25.2055"></script>
 </body>
 </html>

@@ -382,6 +382,40 @@ function showPos(e) {
   log(`📡 #${n} ${e.lat.toFixed(6)}, ${e.lon.toFixed(6)} · גובה ${e.alt} מ׳ · דיוק ~${fmtAcc(accM(e))} מ׳${e.window_left ? ` · עוד ${fmtDur(e.window_left)} של עדכונים` : ''}`);
 }
 
+// Countdown of I_M_Here's flight window (first 5 minutes after power-on). Every message that carries the
+// time left (position push, first-fix report, pong while logging) re-syncs it; in between it ticks locally.
+const WINDOW_S = 300;
+const fmtClock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const winTimer = {
+  endAt: 0, tick: null, hideTimer: null,
+  sync(leftS) {
+    if (!(leftS > 0) || leftS > WINDOW_S) return;
+    this.endAt = Date.now() + leftS * 1000;
+    clearTimeout(this.hideTimer);
+    $('winTimer').hidden = false;
+    $('winTimer').classList.remove('over');
+    if (!this.tick) this.tick = setInterval(() => this.render(), 1000);
+    this.render();
+  },
+  render() {
+    const left = Math.max(0, Math.ceil((this.endAt - Date.now()) / 1000));
+    const done = WINDOW_S - left;
+    $('wtBar').style.width = `${(100 * done) / WINDOW_S}%`;
+    if (left > 0) {
+      $('wtLeft').textContent = fmtClock(left);
+      $('wtSub').textContent = `עברו ${fmtClock(done)} מההדלקה · נותרו ${fmtClock(left)} · מיקום כל 20 ש׳, לוג כל שנייה`;
+      return;
+    }
+    clearInterval(this.tick);
+    this.tick = null;
+    $('winTimer').classList.add('over');
+    $('wtLeft').textContent = '5:00';
+    $('wtSub').textContent = 'ה-5 דקות הסתיימו: ה-GPS נכנס לשינה, אפשר להוריד את לוג הטיסה';
+    log('⏱ 5 הדקות הראשונות של ⁨I_M_Here⁩ הסתיימו');
+    this.hideTimer = setTimeout(() => { $('winTimer').hidden = true; }, 60000);
+  },
+};
+
 // New position from the flight: coordinates and distance green for 2 s, then back to normal
 let flashTimer = null;
 function flashFresh() {
@@ -1033,6 +1067,7 @@ function onEvent(e) {
     case 'pong':
       log(`✓ פינג: זמן פעולה ${fmtDur(e.uptime)}${e.ble_left ? `, BLE עוד ${fmtDur(e.ble_left)}` : ''}${e.batt_mv ? `, סוללה ${(e.batt_mv / 1000).toFixed(2)}V` : ''}`);
       lastFlags = e.flags; renderLink();
+      if (e.flags & FLAG.LOGGING) winTimer.sync(WINDOW_S - e.uptime);
       if (pingLoop.running) pingLoop.result(true);
       else cmdDone('ping', true);
       break;
@@ -1040,6 +1075,7 @@ function onEvent(e) {
       if (e.boot) log('📡 ⁨I_M_Here⁩ מצא מיקום ראשון אחרי ההדלקה ושלח אותו');
       showLocation(e);
       if (e.boot) {  // pushed on its own, not an answer to a button
+        winTimer.sync(WINDOW_S - e.uptime);
         if (e.has_fix) { flightPts.add(e); flashFresh(); }
         break;
       }
@@ -1048,6 +1084,7 @@ function onEvent(e) {
       break;
     case 'pos':
       lastFlags = e.flags; renderLink();
+      winTimer.sync(e.window_left);
       showPos(e);
       break;
     case 'log_info':
@@ -1181,7 +1218,7 @@ function startCompass() {
 
 // ================================================================ wiring
 // Stamped by tools/bump_web_version.py on every publish; shown in the log header
-const APP_VERSION = '2026-11-25.2001';
+const APP_VERSION = '2026-11-25.2055';
 
 function init() {
   $('appVer').textContent = `גרסה ${APP_VERSION}`;
